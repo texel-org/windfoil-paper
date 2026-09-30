@@ -83,9 +83,7 @@ export async function renderChunked(device, scene, raster, {
     maxPieces: scene.pieceCount,
     maxCurves: scene.curveCount,
     outputAlpha: transparent,
-    // This utility only runs the forward pass. Keep the tiny shape-alpha
-    // allocation and omit the much larger geometry-gradient buffers.
-    train: { geometry: false, colour: false, alpha: true },
+    forwardOnly: true,
   });
   try {
     for (let index = 0; index < plan.chunks.length; index++) {
@@ -99,7 +97,7 @@ export async function renderChunked(device, scene, raster, {
           raster.origin[1] + region.y * raster.scale,
         ],
         bg: compositeBackground,
-      });
+      }, { uploadGeometry: index === 0 });
       const image = await renderer.forward();
       blit(
         rgba,

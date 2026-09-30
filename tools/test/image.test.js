@@ -23,10 +23,39 @@ import {
   loadImageSource,
   rgba16ToPng,
   rgba8ToPng,
+  resizeImage,
 } from '../../demos/util/image.js';
 
 const JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAABAAIDAREAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDs/gx/yR7wn/2LVh/6TpX+Yeef8jvFf9fJ/wDpTP8AMj6UX/KTPG//AGN8y/8AU2sf/9k=';
 const jpegAvailable = await import('jpeg-js').then(() => true).catch(() => false);
+
+test('resizing retains grayscale, alpha compositing, and clamped borders at both depths', () => {
+  for (const depth of [8, 16]) {
+    const max = depth === 16 ? 65535 : 255;
+    const Samples = depth === 16 ? Uint16Array : Uint8Array;
+    for (const channels of [1, 2, 3, 4]) {
+      // Black and white pixels, with black transparent in the alpha formats.
+      const data = new Samples(2 * channels);
+      data.fill(max, channels);
+      const source = { width: 2, height: 1, channels, depth, data };
+      const hasAlpha = channels === 2 || channels === 4;
+      assert.deepEqual([...resizeImage(source, 1, 1)],
+        hasAlpha ? [1, 1, 1, 1] : [0.5, 0.5, 0.5, 1]);
+      const up = resizeImage(source, 4, 3);
+      const expected = hasAlpha ? [1, 1, 1, 1] : [0, 0.25, 0.75, 1];
+      for (let y = 0; y < 3; y++) {
+        for (let x = 0; x < 4; x++) {
+          assert.deepEqual([...up.subarray(4 * (y * 4 + x), 4 * (y * 4 + x + 1))],
+            [expected[x], expected[x], expected[x], 1]);
+        }
+      }
+    }
+    // The red sample is transparent; its color must not leak into interpolation.
+    const data = Samples.of(max, 0, 0, 0, 0, 0, max, max);
+    assert.deepEqual([...resizeImage({ width: 2, height: 1, channels: 4, depth, data }, 1, 1)],
+      [0.5, 0.5, 1, 1]);
+  }
+});
 
 test('letterbox paints outside the content rect and blends partial edge pixels', () => {
   // Opaque 4x1 canvas; content covers x in [1, 2.5), so pixel 2 is half

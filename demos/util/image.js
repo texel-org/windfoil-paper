@@ -54,37 +54,46 @@ export function resizeImage(source, width, height) {
   const { width: sw, height: sh, channels, data, depth } = source;
   const max = depth === 16 ? 65535 : 255;
   const out = new Float32Array(width * height * 4);
-
-  const sample = (x, y, c) => {
-    const index = (Math.max(0, Math.min(sh - 1, y)) * sw + Math.max(0, Math.min(sw - 1, x))) * channels;
-    if (channels === 1 || channels === 2) return data[index] / max;
-    return data[index + c] / max;
-  };
-  const alpha = (x, y) => {
-    if (channels !== 2 && channels !== 4) return 1;
-    const index = (Math.max(0, Math.min(sh - 1, y)) * sw + Math.max(0, Math.min(sw - 1, x))) * channels;
-    return data[index + channels - 1] / max;
-  };
-
+  const gray = channels <= 2;
+  const hasAlpha = channels === 2 || channels === 4;
+  // X coordinates repeat on every row. Keep their weights in f64 to preserve
+  // the original interpolation, including alpha compositing on white.
+  const left = new Int32Array(width), right = new Int32Array(width);
+  const fraction = new Float64Array(width);
+  for (let x = 0; x < width; x++) {
+    const sx = (x + 0.5) * sw / width - 0.5;
+    const x0 = Math.floor(sx);
+    left[x] = Math.max(0, Math.min(sw - 1, x0)) * channels;
+    right[x] = Math.max(0, Math.min(sw - 1, x0 + 1)) * channels;
+    fraction[x] = sx - x0;
+  }
   for (let y = 0; y < height; y++) {
     const sy = (y + 0.5) * sh / height - 0.5;
     const y0 = Math.floor(sy), fy = sy - y0;
+    const top = Math.max(0, Math.min(sh - 1, y0)) * sw * channels;
+    const bottom = Math.max(0, Math.min(sh - 1, y0 + 1)) * sw * channels;
     for (let x = 0; x < width; x++) {
-      const sx = (x + 0.5) * sw / width - 0.5;
-      const x0 = Math.floor(sx), fx = sx - x0;
-      const weights = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy];
-      const points = [[x0, y0], [x0 + 1, y0], [x0, y0 + 1], [x0 + 1, y0 + 1]];
+      const fx = fraction[x];
+      const w0 = (1 - fx) * (1 - fy), w1 = fx * (1 - fy);
+      const w2 = (1 - fx) * fy, w3 = fx * fy;
+      const p0 = top + left[x], p1 = top + right[x];
+      const p2 = bottom + left[x], p3 = bottom + right[x];
+      const a0 = hasAlpha ? data[p0 + channels - 1] / max : 1;
+      const a1 = hasAlpha ? data[p1 + channels - 1] / max : 1;
+      const a2 = hasAlpha ? data[p2 + channels - 1] / max : 1;
+      const a3 = hasAlpha ? data[p3 + channels - 1] / max : 1;
       const o = 4 * (y * width + x);
       let a = 0;
-      for (let k = 0; k < 4; k++) a += weights[k] * alpha(points[k][0], points[k][1]);
-      for (let c = 0; c < 3; c++) {
+      a += w0 * a0; a += w1 * a1; a += w2 * a2; a += w3 * a3;
+      for (let c = 0; c < (gray ? 1 : 3); c++) {
         let value = 0;
-        for (let k = 0; k < 4; k++) {
-          value += weights[k] * sample(points[k][0], points[k][1], c) *
-            alpha(points[k][0], points[k][1]);
-        }
+        value += w0 * (data[p0 + c] / max) * a0;
+        value += w1 * (data[p1 + c] / max) * a1;
+        value += w2 * (data[p2 + c] / max) * a2;
+        value += w3 * (data[p3 + c] / max) * a3;
         out[o + c] = value + (1 - a);
       }
+      if (gray) out[o + 1] = out[o + 2] = out[o];
       out[o + 3] = 1;
     }
   }

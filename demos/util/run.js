@@ -211,6 +211,7 @@ export async function runCase({
     if (config.saveEvery) {
       await mkdir(`${path}/frames`);
       frameRenderer = await Renderer.create(device, {
+        forwardOnly: true,
         width: config.saveWidth,
         height: config.saveHeight,
         maxShapes: model.maxShapes,
@@ -305,6 +306,7 @@ export async function runCase({
     const cropRenderer =
       pad > 0
         ? await Renderer.create(device, {
+            forwardOnly: true,
             width,
             height,
             maxShapes: model.maxShapes,
@@ -427,6 +429,7 @@ export async function runCase({
         const eh = config.exportHeight;
         const f = Math.max(ew, eh) / Math.max(width, height);
         const exportRenderer = await Renderer.create(device, {
+          forwardOnly: true,
           width: ew,
           height: eh,
           maxShapes: model.maxShapes,

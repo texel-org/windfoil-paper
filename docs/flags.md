@@ -265,18 +265,18 @@ dominates instead.
 
 ### Dense tiles and the sort capacity
 
-`bin_sort` restores painter order one workgroup per tile, sorting the tile's
-shape list in workgroup memory. Lists longer than that memory fall back to an
-exact but **serial** comb sort, roughly 100x slower: a cliff, not a slope. It is
-reached when many shapes crowd few tiles, i.e. large shapes or a small raster,
-not by large N alone.
+`bin_sort` restores painter order one workgroup per tile. It sorts ordinary
+lists in workgroup memory. Larger lists use an ordered parallel gather that
+reconstructs the same ascending shape IDs, removing the former serial comb-sort
+cliff. Its cost depends on total shape count; the bitonic path depends on tile
+occupancy.
 
 Capacity is chosen twice: `sortCapacity` takes the largest power of two the
 device's `maxComputeWorkgroupStorageSize` allows (2,048 entries on WebGPU's
 guaranteed 16 KiB, 8,192 on a 48 KiB device), and `sortCapacityFor` then picks
 the smallest specialization a scene needs from its mean tile occupancy. Too
-small falls off the cliff; too large wastes workgroup storage and costs occupancy
-where tiles are many and short.
+small invokes the gather more often; too large uses extra workgroup storage
+and can cost occupancy where tiles are many and short.
 
 ### A/B switches
 
@@ -288,7 +288,7 @@ same session:
 | --- | --- |
 | `WF_SCAN=serial` | Use the original single-lane tile-offset scan instead of the parallel scan. |
 | `WF_FUSE_L2=0` | Run forward and the L2 gradient as two passes instead of the fused `forward_l2` kernel. |
-| `WF_SORT_CAPACITY=N` | Force the `bin_sort` capacity (a power of two). This is how the serial fallback gets exercised on a device that would never otherwise reach it. |
+| `WF_SORT_CAPACITY=N` | Force the `bin_sort` capacity (a power of two). Small capacities exercise the ordered gather even on sparse scenes. |
 
 All three produce the same image and gradients as the defaults; only the timing
 differs.

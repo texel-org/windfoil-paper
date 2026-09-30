@@ -61,6 +61,7 @@ Complete the Python/JAX step first, then install the CLIP loss server:
 | `web:demo`, `web:build`, `web:preview` | Browser demo |
 | `fixtures`, `fixtures:farlev` | Fetch and verify every declared target image; just the demos' default image |
 | `bench`, `bench:suite` | The reference sweep; one target matrix |
+| `perf`, `perf:image` | Focused renderer/optimizer and target-resizing measurements |
 | `test`, `test:jax`, `check:deno`, `validate` | JavaScript, JAX, and Deno checks |
 | `test:oracle` | WebGPU/JAX forward and VJP parity |
 
@@ -96,6 +97,9 @@ npm run demo:l2 -- --target=photo.png --opt-size=max
 L2 preserves the source aspect ratio: `--opt-size=N` sets its longest side,
 while `max` uses the native dimensions. Sweeps can mix both forms, such as
 `--opt-size=128,max`.
+
+Shader and startup findings, measured gains, and reproduction commands are in
+the [performance investigation](docs/performance.md).
 
 ### Output resolution
 

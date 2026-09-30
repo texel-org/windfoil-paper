@@ -91,8 +91,7 @@ test('tile capacity grows geometrically within the device binding limit', () => 
 });
 
 test('sort capacity follows the device and the scene', () => {
-  // Above its capacity a tile falls back to a serial comb sort, so capacity
-  // decides whether a dense tile costs microseconds or tens of milliseconds.
+  // Capacity selects the bitonic sort or the ordered parallel gather.
   assert.equal(sortCapacity({ maxComputeWorkgroupStorageSize: 16384 }, null), 2048);
   assert.equal(sortCapacity({ maxComputeWorkgroupStorageSize: 49152 }, null), 8192);
   assert.equal(sortCapacity({}, null), 2048); // WebGPU's guaranteed minimum
@@ -170,6 +169,7 @@ test('renderer grows compact storage and refreshes every dependent bind group', 
     renderer = await Renderer.create(device, {
       width: 512, height: 512, maxPieces: 0, maxShapes: 2, maxCurves: 0,
     });
+    void renderer.fwdPipe;
     const scene = (count) => ({
       pieceData: new Float32Array(),
       pieceCount: 0,
@@ -259,6 +259,9 @@ test('blend modes validate, specialize pipelines, and skip the painter sort', as
       curveCount: 0,
     }, settings);
     renderer.forwardNoRead();
+    renderer.forwardNoRead();
+    assert.equal(dispatched.filter((entry) => entry === 'bin_fill').length, 1,
+      'repeated forward should reuse the existing tile lists');
     renderer.destroy();
     return { pipelines, dispatched };
   };
@@ -406,8 +409,9 @@ test('tonemap specializes only the loss kernels and keeps the image linear', asy
       width: 8, height: 8, maxPieces: 0, maxShapes: 1, maxCurves: 0, tonemap,
     });
     renderer.uploadTarget(new Float32Array(8 * 8 * 4)); // builds the L2 pipelines
+    void renderer.fwdPipe; // generic forward is compiled only when requested
     const constants = (entryPoint) =>
-      pipelines.find((pipe) => pipe.entryPoint === entryPoint).constants;
+      pipelines.find((pipe) => pipe.entryPoint === entryPoint)?.constants;
     const result = {
       uniformBytes,
       forward: constants('forward'),
@@ -422,11 +426,11 @@ test('tonemap specializes only the loss kernels and keeps the image linear', asy
   try {
     const plain = await run(undefined);
     assert.equal(plain.uniformBytes, 80);
-    assert.equal(plain.l2grad.TONEMAP, 0);
+    assert.equal(plain.l2grad, undefined);
     assert.equal(plain.fused.TONEMAP, 0);
 
     const mapped = await run('reinhard');
-    assert.equal(mapped.l2grad.TONEMAP, 1);
+    assert.equal(mapped.l2grad, undefined);
     assert.equal(mapped.fused.TONEMAP, 1);
     // The composite stays linear: forward and backward carry no TONEMAP.
     assert.equal('TONEMAP' in mapped.forward, false);
@@ -435,11 +439,11 @@ test('tonemap specializes only the loss kernels and keeps the image linear', asy
     // The white-point operators are further codes on the same loss kernels;
     // the composite pipelines still never see them.
     const white = await run('reinhard-white');
-    assert.equal(white.l2grad.TONEMAP, 2);
+    assert.equal(white.l2grad, undefined);
     assert.equal(white.fused.TONEMAP, 2);
     assert.equal('TONEMAP' in white.forward, false);
     const smooth = await run('smooth');
-    assert.equal(smooth.l2grad.TONEMAP, 3);
+    assert.equal(smooth.l2grad, undefined);
     assert.equal(smooth.fused.TONEMAP, 3);
     assert.equal('TONEMAP' in smooth.backward, false);
   } finally {
@@ -487,7 +491,7 @@ test('GPU binning retains its exact ascending painter-order sort', async () => {
   assert.match(source, /fn bin_scan_blocks[\s\S]*tileOffset\[nt\] = carry;/);
   assert.match(source, /fn bin_scan_add[\s\S]*tileOffset\[gid\.x\] \+= tileBlockSum\[wgid\.x\];/);
   assert.match(source, /fn bin_fill[\s\S]*tileShapes\[pos\] = si;/);
-  assert.match(source, /fn bin_sort[\s\S]*if \(a > b\)/);
+  assert.match(source, /fn bin_sort[\s\S]*let ascending =/);
   assert.match(source, /fn forward[\s\S]*let si = tileShapes\[k - 1u\]/);
   assert.match(source, /fn backward[\s\S]*let si = tileShapes\[k - 1u\]/);
 });

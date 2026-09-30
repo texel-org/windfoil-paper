@@ -5,6 +5,29 @@ import { TONEMAP_DOMAINS, TONEMAP_HAS_WHITE, TONEMAP_MODES } from './tonemap.js'
 const WGSL_SOURCES = ['scene', 'coverage', 'binning', 'render']
   .map((name) => new URL(`./wgsl/${name}.wgsl`, import.meta.url));
 
+// Sources are immutable for this module's lifetime. Cache GPU objects per
+// device: resolution, scene capacity, and buffer identity do not affect code.
+const sourceLoads = new Map();
+const deviceModules = new WeakMap();
+const devicePipelines = new WeakMap();
+
+function cachedPipeline(device, descriptor) {
+  let modules = devicePipelines.get(device);
+  if (!modules) devicePipelines.set(device, modules = new WeakMap());
+  const { module, entryPoint, constants = {} } = descriptor.compute;
+  let layouts = modules.get(module);
+  if (!layouts) modules.set(module, layouts = new Map());
+  let cache = layouts.get(descriptor.layout);
+  if (!cache) layouts.set(descriptor.layout, cache = new Map());
+  const key = JSON.stringify([entryPoint, Object.entries(constants).sort(([a], [b]) => a.localeCompare(b))]);
+  let pipeline = cache.get(key);
+  if (!pipeline) {
+    pipeline = device.createComputePipeline(descriptor);
+    cache.set(key, pipeline);
+  }
+  return pipeline;
+}
+
 let dawnHost = null;
 let dawnLoad = null;
 let hostInfo = {
@@ -119,7 +142,7 @@ export function getWebGPUHostInfo() {
   return hostInfo;
 }
 
-export async function requestDevice() {
+export async function requestDevice({ timestampQuery = false } = {}) {
   const { adapter, environment, backend } = await requestAdapter();
   if (!adapter) {
     throw new Error('No WebGPU adapter (Deno: run with --unstable-webgpu on a GPU host).');
@@ -129,7 +152,9 @@ export async function requestDevice() {
   for (const name of ['maxStorageBufferBindingSize', 'maxBufferSize', 'maxComputeWorkgroupStorageSize']) {
     if (adapter.limits?.[name] !== undefined) requiredLimits[name] = adapter.limits[name];
   }
-  const device = await adapter.requestDevice({ requiredLimits });
+  const requiredFeatures = timestampQuery && adapter.features.has('timestamp-query')
+    ? ['timestamp-query'] : [];
+  const device = await adapter.requestDevice({ requiredLimits, requiredFeatures });
   device.addEventListener?.('uncapturederror', (e) => {
     console.error('WebGPU error:', e.error?.message);
   });
@@ -159,14 +184,29 @@ async function readSource(url) {
 
 /** Concatenate the WGSL modules into one shader and fail on compile errors. */
 async function createShaderModule(device, urls) {
-  const parts = await Promise.all(urls.map((url) => readSource(url)));
-  const module = device.createShaderModule({ code: parts.join('\n') });
-  const info = await module.getCompilationInfo();
-  const errors = info.messages.filter((m) => m.type === 'error');
-  if (errors.length) {
-    throw new Error('WGSL compile errors:\n' + errors.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join('\n'));
+  const key = urls.map(String).join('\n');
+  let modules = deviceModules.get(device);
+  if (!modules) deviceModules.set(device, modules = new Map());
+  let pending = modules.get(key);
+  if (!pending) {
+    pending = (async () => {
+      let sourceLoad = sourceLoads.get(key);
+      if (!sourceLoad) {
+        sourceLoad = Promise.all(urls.map((url) => readSource(url))).then((parts) => parts.join('\n'));
+        sourceLoads.set(key, sourceLoad);
+      }
+      const module = device.createShaderModule({ code: await sourceLoad });
+      const info = await module.getCompilationInfo();
+      const errors = info.messages.filter((m) => m.type === 'error');
+      if (errors.length) {
+        throw new Error('WGSL compile errors:\n' + errors.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join('\n'));
+      }
+      return module;
+    })();
+    modules.set(key, pending);
+    pending.catch(() => { modules.delete(key); sourceLoads.delete(key); });
   }
-  return module;
+  return pending;
 }
 
 // Host-agnostic env read: Deno needs permission, browsers have no process.
@@ -186,11 +226,11 @@ const SCAN_WG = 256; // tile-offset scan workgroup; MUST match SCAN_WG in binnin
 const SORT_CAPACITY_MIN = 2048;   // fits WebGPU's guaranteed 16 KiB of workgroup storage
 const SORT_CAPACITY_MAX = 16384;  // beyond this the sort is no longer the bottleneck
 
-// Entries bin_sort can hold in workgroup memory. Above it a tile falls back to a
-// serial comb sort, which is ~100x slower, so use whatever the device allows.
+// Entries bin_sort can hold in workgroup memory. Larger tiles use an ordered
+// gather; retain enough storage to sort moderately dense tiles directly.
 // Power of two: the bitonic network sorts a power-of-two span.
 // Capacity the workload wants: enough headroom over the mean tile list that
-// realistic tiles stay off the serial fallback, without allocating workgroup
+// typical tiles use the bitonic path, without allocating workgroup
 // storage a sparse scene will never use -- large scratch costs occupancy, which
 // is measurable when tiles are small and numerous.
 export function sortCapacityFor(meanEntriesPerTile, deviceCapacity) {
@@ -201,7 +241,7 @@ export function sortCapacityFor(meanEntriesPerTile, deviceCapacity) {
 }
 
 export function sortCapacity(limits, override = readEnv('WF_SORT_CAPACITY')) {
-  // The override exists to exercise the serial fallback, which is otherwise
+  // The override exists to exercise the ordered gather, which is otherwise
   // unreachable on a device with generous workgroup storage.
   if (override) {
     const wanted = Number(override);
@@ -211,7 +251,7 @@ export function sortCapacity(limits, override = readEnv('WF_SORT_CAPACITY')) {
     return wanted;
   }
   const bytes = Number(limits?.maxComputeWorkgroupStorageSize ?? 16384);
-  const usable = Math.max(0, bytes - 64); // sortInfo and alignment slack
+  const usable = Math.max(0, bytes - 1088); // gatherScratch, sortInfo, alignment
   let capacity = SORT_CAPACITY_MIN;
   while (capacity * 2 * 4 <= usable && capacity * 2 <= SORT_CAPACITY_MAX) capacity *= 2;
   return capacity;
@@ -221,7 +261,7 @@ const UINT32_MAX = 0xffffffff;
 // Scene-wide blend modes. code MUST match the BLEND_* constants in
 // render.wgsl. sorted marks compositing as painter-order dependent;
 // order-independent modes skip bin_sort entirely (dense tiles never touch the
-// serial fallback) and their backward never reads the forward image. Future
+// sort or gather) and their backward never reads the forward image. Future
 // modes (weighted OIT, log-sum-exp, ...) are one row here plus their
 // branches in composite() and backward().
 export const BLEND_MODES = Object.freeze({
@@ -346,7 +386,9 @@ export class Renderer {
     tonemap,
     colorRange,
     outputAlpha = false,
+    forwardOnly = false,
   }) {
+    this.forwardOnly = !!forwardOnly;
     // The whole scene composites with one blend mode, fixed per renderer and
     // specialized into the forward/backward pipelines like the train flags.
     this.blend = blend ?? 'src-over';
@@ -391,7 +433,9 @@ export class Renderer {
     // blur (per-shape filter size) is the one group that defaults OFF: it
     // widens the shape-gradient stride from 4 to 6, so leaving it out keeps
     // the default pipelines byte-for-byte identical to before.
-    const t = train ?? {};
+    const t = this.forwardOnly
+      ? { geometry: false, colour: false, alpha: false, blur: false }
+      : train ?? {};
     const flag = (value) => value === undefined ? true : !!value;
     this.train = Object.freeze({
       geometry: flag(t.geometry),
@@ -403,7 +447,7 @@ export class Renderer {
     // blur is opt-in, so its absence is the baseline, not a freeze.
     this.frozen = Object.freeze(Object.entries(this.train)
       .filter(([name, on]) => !on && name !== 'blur').map(([name]) => name));
-    if (!this.train.geometry && !this.train.colour && !this.train.alpha && !this.train.blur) {
+    if (!this.forwardOnly && !this.train.geometry && !this.train.colour && !this.train.alpha && !this.train.blur) {
       throw new Error('train: at least one parameter group must be enabled');
     }
     this.gradStride = this.train.blur ? 6 : 4;
@@ -464,7 +508,7 @@ export class Renderer {
     this.shapesBuf = mk(Math.max(this.maxShapes * 64, 64), STORAGE);
     this.piecesBuf = mk(Math.max(this.maxPieces * 24, 4), STORAGE);
     this.imageBuf = mk(this.pixels * 16, STORAGE);
-    this.dLdImageBuf = mk(this.pixels * 16, STORAGE);
+    this.dLdImageBuf = this.forwardOnly ? null : mk(this.pixels * 16, STORAGE);
     // Geometry buffers are the large ones (pieces * 24 and curves * 24), and
     // curveMeta is uploaded every step purely for reduce_curve_grads, so a
     // frozen-geometry renderer allocates and uploads none of them.
@@ -477,8 +521,8 @@ export class Renderer {
     // are never allocated.
     const wantShape = this.train.colour || this.train.alpha || this.train.blur;
     this.wantShape = wantShape;
-    this.pieceGradsBuf = mk(this.train.geometry ? Math.max(this.maxPieces * 48, 8) : 4, STORAGE);
-    this.shapeGradsBuf = mk(
+    this.pieceGradsBuf = this.forwardOnly ? null : mk(this.train.geometry ? Math.max(this.maxPieces * 48, 8) : 4, STORAGE);
+    this.shapeGradsBuf = this.forwardOnly ? null : mk(
       wantShape ? Math.max(SLOTS * this.maxShapes * this.gradStride * 8, 8) : 4, STORAGE);
     this.curveMetaBuf = this.train.geometry ? mk(Math.max(this.maxCurves * 16, 16), STORAGE) : null;
     this.curveGradsBuf = this.train.geometry ? mk(Math.max(this.maxCurves * 24, 4), STORAGE) : null;
@@ -496,18 +540,11 @@ export class Renderer {
     // measuring what the parallel scan is worth on a given canvas.
     this.serialScan = readEnv('WF_SCAN') === 'serial';
 
-    const pipe = (entryPoint) => d.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+    const pipe = (entryPoint) => cachedPipeline(d, { layout: 'auto', compute: { module, entryPoint } });
     this.blendCode = BLEND_MODES[this.blend].code;
     this.sorted = BLEND_MODES[this.blend].sorted;
-    this.fwdPipe = d.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module,
-        entryPoint: 'forward',
-        constants: { BLEND_MODE: this.blendCode, OUTPUT_ALPHA: this.outputAlpha ? 1 : 0 },
-      },
-    });
-    this.bwdPipe = d.createComputePipeline({
+    this._fwdPipe = null; // fused L2 training does not use the generic forward
+    this.bwdPipe = this.forwardOnly ? null : cachedPipeline(d, {
       layout: 'auto',
       compute: {
         module,
@@ -523,10 +560,10 @@ export class Renderer {
       },
     });
     this.binCountPipe = pipe('bin_count');
-    this.binScanPipe = pipe('bin_scan');
-    this.binScanBlockPipe = pipe('bin_scan_block');
-    this.binScanBlocksPipe = pipe('bin_scan_blocks');
-    this.binScanAddPipe = pipe('bin_scan_add');
+    this.binScanPipe = this.serialScan ? pipe('bin_scan') : null;
+    this.binScanBlockPipe = this.serialScan ? null : pipe('bin_scan_block');
+    this.binScanBlocksPipe = this.serialScan ? null : pipe('bin_scan_blocks');
+    this.binScanAddPipe = this.serialScan ? null : pipe('bin_scan_add');
     this.binFillPipe = pipe('bin_fill');
     // Pipelines are specialized per capacity and cached; the scene picks one.
     // Order-independent blends never sort, so they never build a sort pipeline.
@@ -534,9 +571,9 @@ export class Renderer {
     this.sortCapacity = SORT_CAPACITY_MIN;
     this._sortPipes = new Map();
     this._sortBinds = new Map();
-    this.binSortPipe = this.sorted ? this.#sortPipeline(this.sortCapacity) : null;
+    this.binSortPipe = null; // choose its specialization after the first upload
     this.reducePipe = wantShape
-      ? d.createComputePipeline({
+      ? cachedPipeline(d, {
           layout: 'auto',
           compute: {
             module,
@@ -554,27 +591,27 @@ export class Renderer {
       entry(1, this.shapesBuf),
       entry(9, this.tileCountBuf),
     ]);
-    this.binScanBind = bind(this.binScanPipe, [
+    this.binScanBind = this.binScanPipe ? bind(this.binScanPipe, [
       entry(0, this.uniforms),
       entry(9, this.tileCountBuf),
       entry(10, this.tileOffsetBuf),
-    ]);
-    this.binScanBlockBind = bind(this.binScanBlockPipe, [
+    ]) : null;
+    this.binScanBlockBind = this.binScanBlockPipe ? bind(this.binScanBlockPipe, [
       entry(0, this.uniforms),
       entry(9, this.tileCountBuf),
       entry(10, this.tileOffsetBuf),
       entry(14, this.tileBlockSumBuf),
-    ]);
-    this.binScanBlocksBind = bind(this.binScanBlocksPipe, [
+    ]) : null;
+    this.binScanBlocksBind = this.binScanBlocksPipe ? bind(this.binScanBlocksPipe, [
       entry(0, this.uniforms),
       entry(10, this.tileOffsetBuf),
       entry(14, this.tileBlockSumBuf),
-    ]);
-    this.binScanAddBind = bind(this.binScanAddPipe, [
+    ]) : null;
+    this.binScanAddBind = this.binScanAddPipe ? bind(this.binScanAddPipe, [
       entry(0, this.uniforms),
       entry(10, this.tileOffsetBuf),
       entry(14, this.tileBlockSumBuf),
-    ]);
+    ]) : null;
     this.reduceBind = this.reducePipe ? bind(this.reducePipe, [
       entry(0, this.uniforms),
       entry(6, this.shapeGradsBuf),
@@ -586,12 +623,32 @@ export class Renderer {
       entry(13, this.curveGradsBuf),
     ]) : null;
     this.#refreshTileShapeBindings();
+    if (this.forwardOnly) void this.fwdPipe;
+  }
+
+  get fwdPipe() {
+    if (!this._fwdPipe) {
+      this._fwdPipe = cachedPipeline(this.device, { layout: 'auto', compute: {
+        module: this.module, entryPoint: 'forward',
+        constants: { BLEND_MODE: this.blendCode, OUTPUT_ALPHA: this.outputAlpha ? 1 : 0 },
+      } });
+      this.fwdBind = this.device.createBindGroup({ layout: this._fwdPipe.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.uniforms } },
+          { binding: 1, resource: { buffer: this.shapesBuf } },
+          { binding: 2, resource: { buffer: this.piecesBuf } },
+          { binding: 3, resource: { buffer: this.imageBuf } },
+          { binding: 10, resource: { buffer: this.tileOffsetBuf } },
+          { binding: 11, resource: { buffer: this.tileShapesBuf } },
+        ] });
+    }
+    return this._fwdPipe;
   }
 
   #sortPipeline(capacity) {
     let pipe = this._sortPipes.get(capacity);
     if (!pipe) {
-      pipe = this.device.createComputePipeline({
+      pipe = cachedPipeline(this.device, {
         layout: 'auto',
         compute: {
           module: this.module,
@@ -611,6 +668,7 @@ export class Renderer {
         layout: this.#sortPipeline(capacity).getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: { buffer: this.uniforms } },
+          { binding: 1, resource: { buffer: this.shapesBuf } },
           { binding: 10, resource: { buffer: this.tileOffsetBuf } },
           { binding: 11, resource: { buffer: this.tileShapesBuf } },
         ],
@@ -626,15 +684,15 @@ export class Renderer {
     const d = this.device;
     const entry = (binding, buffer) => ({ binding, resource: { buffer } });
     const bind = (pipe, entries) => d.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries });
-    this.fwdBind = bind(this.fwdPipe, [
+    this.fwdBind = this._fwdPipe ? bind(this._fwdPipe, [
       entry(0, this.uniforms),
       entry(1, this.shapesBuf),
       entry(2, this.piecesBuf),
       entry(3, this.imageBuf),
       entry(10, this.tileOffsetBuf),
       entry(11, this.tileShapesBuf),
-    ]);
-    this.bwdBind = bind(this.bwdPipe, [
+    ]) : null;
+    this.bwdBind = this.bwdPipe ? bind(this.bwdPipe, [
       entry(0, this.uniforms),
       entry(1, this.shapesBuf),
       entry(2, this.piecesBuf),
@@ -644,7 +702,7 @@ export class Renderer {
       entry(6, this.shapeGradsBuf),
       entry(10, this.tileOffsetBuf),
       entry(11, this.tileShapesBuf),
-    ]);
+    ]) : null;
     this.binFillBind = bind(this.binFillPipe, [
       entry(0, this.uniforms),
       entry(1, this.shapesBuf),
@@ -704,60 +762,65 @@ export class Renderer {
 
   // Allocate the target-sized L2 buffers only when used.
   #ensureL2() {
-    if (this.l2gradPipe) return;
+    if (this.forwardOnly) throw new Error('forwardOnly renderer cannot train');
+    if (this.lossBuf) return;
     const d = this.device;
     const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
     this.targetBuf = d.createBuffer({ size: this.pixels * 16, usage: STORAGE });
     this.lossBuf = d.createBuffer({ size: 16, usage: STORAGE });
-    this.l2gradPipe = d.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module: this.module,
-        entryPoint: 'l2grad',
-        constants: { TONEMAP: this.tonemapCode },
-      },
-    });
-    this.l2gradBind = d.createBindGroup({
-      layout: this.l2gradPipe.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniforms } },
-        { binding: 3, resource: { buffer: this.imageBuf } },
-        { binding: 4, resource: { buffer: this.dLdImageBuf } },
-        { binding: 7, resource: { buffer: this.targetBuf } },
-        { binding: 8, resource: { buffer: this.lossBuf } },
-      ],
-    });
-    // Fused forward+L2: same outputs as forward then l2grad, one dispatch.
-    this.fwdL2Pipe = d.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module: this.module,
-        entryPoint: 'forward_l2',
-        constants: {
-          BLEND_MODE: this.blendCode,
-          OUTPUT_ALPHA: this.outputAlpha ? 1 : 0,
-          TONEMAP: this.tonemapCode,
+    if (!this.fuseL2) {
+      this.l2gradPipe = cachedPipeline(d, {
+        layout: 'auto',
+        compute: {
+          module: this.module,
+          entryPoint: 'l2grad',
+          constants: { TONEMAP: this.tonemapCode },
         },
-      },
-    });
-    this.fwdL2Bind = d.createBindGroup({
-      layout: this.fwdL2Pipe.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniforms } },
-        { binding: 1, resource: { buffer: this.shapesBuf } },
-        { binding: 2, resource: { buffer: this.piecesBuf } },
-        { binding: 3, resource: { buffer: this.imageBuf } },
-        { binding: 4, resource: { buffer: this.dLdImageBuf } },
-        { binding: 7, resource: { buffer: this.targetBuf } },
-        { binding: 8, resource: { buffer: this.lossBuf } },
-        { binding: 10, resource: { buffer: this.tileOffsetBuf } },
-        { binding: 11, resource: { buffer: this.tileShapesBuf } },
-      ],
-    });
+      });
+      this.l2gradBind = d.createBindGroup({
+        layout: this.l2gradPipe.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.uniforms } },
+          { binding: 3, resource: { buffer: this.imageBuf } },
+          { binding: 4, resource: { buffer: this.dLdImageBuf } },
+          { binding: 7, resource: { buffer: this.targetBuf } },
+          { binding: 8, resource: { buffer: this.lossBuf } },
+        ],
+      });
+    }
+    // Fused forward+L2: same outputs as forward then l2grad, one dispatch.
+    if (this.fuseL2) {
+      this.fwdL2Pipe = cachedPipeline(d, {
+        layout: 'auto',
+        compute: {
+          module: this.module,
+          entryPoint: 'forward_l2',
+          constants: {
+            BLEND_MODE: this.blendCode,
+            OUTPUT_ALPHA: this.outputAlpha ? 1 : 0,
+            TONEMAP: this.tonemapCode,
+          },
+        },
+      });
+      this.fwdL2Bind = d.createBindGroup({
+        layout: this.fwdL2Pipe.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.uniforms } },
+          { binding: 1, resource: { buffer: this.shapesBuf } },
+          { binding: 2, resource: { buffer: this.piecesBuf } },
+          { binding: 3, resource: { buffer: this.imageBuf } },
+          { binding: 4, resource: { buffer: this.dLdImageBuf } },
+          { binding: 7, resource: { buffer: this.targetBuf } },
+          { binding: 8, resource: { buffer: this.lossBuf } },
+          { binding: 10, resource: { buffer: this.tileOffsetBuf } },
+          { binding: 11, resource: { buffer: this.tileShapesBuf } },
+        ],
+      });
+    }
   }
 
   // scene: output of prep.packScene; settings: {s:[sx,sy], scale, origin:[x,y], bg:[r,g,b]}
-  uploadScene(scene, { s, scale = 1, origin = [0, 0], bg = [1, 1, 1] }) {
+  uploadScene(scene, { s, scale = 1, origin = [0, 0], bg = [1, 1, 1] }, { uploadGeometry = true } = {}) {
     const d = this.device;
     // The Reinhard operators keep their pole unreachable only if the whole
     // composite stays nonnegative; the codec-validated color range covers the
@@ -782,6 +845,10 @@ export class Renderer {
     if (scene.curveCount > this.maxCurves) {
       throw new Error(`curveCount ${scene.curveCount} > maxCurves ${this.maxCurves}`);
     }
+    if (!uploadGeometry && (nShapes !== this.nShapes || scene.pieceCount !== this.nPieces ||
+        scene.curveCount !== this.nCurves)) {
+      throw new Error('uploadGeometry=false requires an already uploaded scene with the same counts');
+    }
     const previousCapacity = this.sortCapacity;
     const tileEntries = countTileEntries(scene.shapeData, {
       width: this.width,
@@ -792,10 +859,10 @@ export class Renderer {
     });
     this.#ensureTileEntryCapacity(tileEntries);
     // Pick the sort specialization this scene needs. Guessing low only costs
-    // speed -- the serial fallback is exact -- so a mean-based estimate is safe.
+    // speed -- the ordered gather is exact -- so a mean-based estimate is safe.
     if (this.sorted) {
       this.sortCapacity = sortCapacityFor(tileEntries / this.nTiles, this.deviceSortCapacity);
-      if (this.sortCapacity !== previousCapacity) {
+      if (this.sortCapacity !== previousCapacity || !this.binSortPipe) {
         this.binSortPipe = this.#sortPipeline(this.sortCapacity);
       }
     }
@@ -820,15 +887,16 @@ export class Renderer {
     f32[16] = this._exposure;
     f32[17] = this._white;
     d.queue.writeBuffer(this.uniforms, 0, this._uniformData);
-    d.queue.writeBuffer(this.shapesBuf, 0, scene.shapeData);
-    if (scene.pieceCount) d.queue.writeBuffer(this.piecesBuf, 0, scene.pieceData, 0, scene.pieceCount * 6);
+    if (uploadGeometry) d.queue.writeBuffer(this.shapesBuf, 0, scene.shapeData);
+    if (uploadGeometry && scene.pieceCount) d.queue.writeBuffer(this.piecesBuf, 0, scene.pieceData, 0, scene.pieceCount * 6);
     // curveMeta feeds reduce_curve_grads only; frozen geometry never reads it.
-    if (this.curveMetaBuf && curveMeta.byteLength) {
+    if (uploadGeometry && this.curveMetaBuf && curveMeta.byteLength) {
       d.queue.writeBuffer(this.curveMetaBuf, 0, curveMeta);
     }
     this.nShapes = nShapes;
     this.nPieces = scene.pieceCount;
     this.nCurves = scene.curveCount;
+    this._tilesDirty = true;
   }
 
   // WebGPU orders dispatches within a pass, so a whole phase is one pass.
@@ -1052,9 +1120,10 @@ export class Renderer {
   // Forward without host readback.
   forwardNoRead() {
     const enc = this.device.createCommandEncoder();
-    enc.clearBuffer(this.tileCountBuf, 0, this.nTiles * 4);
+    if (this._tilesDirty) enc.clearBuffer(this.tileCountBuf, 0, this.nTiles * 4);
     const pass = enc.beginComputePass();
-    this.#binDispatches(pass);
+    if (this._tilesDirty) this.#binDispatches(pass);
+    this._tilesDirty = false;
     this.#dispatch(pass, this.fwdPipe, this.fwdBind, this.gridX, this.gridY);
     pass.end();
     this.device.queue.submit([enc.finish()]);
@@ -1123,6 +1192,7 @@ export class Renderer {
 
   // Backward VJP. Returned arrays are reused on the next call.
   async backward(dLdImage) {
+    if (this.forwardOnly) throw new Error('forwardOnly renderer cannot train');
     const d = this.device;
     if (!(dLdImage instanceof Float32Array) || dLdImage.length !== this.pixels * 4) {
       throw new Error(`dLdImage must be a Float32Array of length ${this.pixels * 4}`);

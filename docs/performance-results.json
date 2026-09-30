@@ -1,0 +1,426 @@
+{
+  "date": "2026-09-30",
+  "host": {
+    "cpu": "Apple M2",
+    "os": "darwin 22.1.0",
+    "node": "v24.16.0",
+    "webgpuAddon": "webgpu-legacy 0.3.0",
+    "backend": "dawn"
+  },
+  "method": "Median of per-run medians; no statistical confidence intervals.",
+  "startup": {
+    "scope": "Same live device, renderer initialization plus upload and first L2 evaluation; excludes device and process creation. Repeat 1 only.",
+    "cases": [
+      {
+        "size": 128,
+        "n": 64,
+        "originalReadyMs": 20.55116700000002,
+        "cachedReadyMs": 1.1771669999999972
+      },
+      {
+        "size": 512,
+        "n": 512,
+        "originalReadyMs": 22.674916999999937,
+        "cachedReadyMs": 3.9637089999999944
+      },
+      {
+        "size": 1024,
+        "n": 512,
+        "originalReadyMs": 32.44929100000013,
+        "cachedReadyMs": 11.557416999999987
+      },
+      {
+        "size": 512,
+        "n": 4096,
+        "originalReadyMs": 27.107417999999598,
+        "cachedReadyMs": 6.689583000000312
+      }
+    ]
+  },
+  "denseGather": {
+    "size": 128,
+    "n": 8192,
+    "radius": 0.4,
+    "steps": 10,
+    "optimizerUpdates": false,
+    "originalMs": 44.02875000000006,
+    "gatherMs": 4.4795839999999885,
+    "exactFinalLoss": true,
+    "speedup": 9.828758652589208
+  },
+  "imageResize": {
+    "date": "2026-09-30T08:01:10.948Z",
+    "node": "v24.16.0",
+    "repetitions": 5,
+    "cases": [
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 8,
+        "channels": 1,
+        "ms": 0.03758299999998371,
+        "baselineMs": 0.3223329999999862,
+        "speedup": 8.576563871966737,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 8,
+        "channels": 1,
+        "ms": 0.10437500000000455,
+        "baselineMs": 1.229167000000018,
+        "speedup": 11.776450299400858,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 8,
+        "channels": 1,
+        "ms": 2.2163749999999993,
+        "baselineMs": 19.43312499999999,
+        "speedup": 8.767976989453498,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 8,
+        "channels": 1,
+        "ms": 5.902833999999984,
+        "baselineMs": 78.21479199999999,
+        "speedup": 13.250379732853778,
+        "exact": true
+      },
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 8,
+        "channels": 2,
+        "ms": 0.04662499999994907,
+        "baselineMs": 0.9962499999999181,
+        "speedup": 21.36729222522266,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 8,
+        "channels": 2,
+        "ms": 0.15545800000018062,
+        "baselineMs": 1.1340840000000298,
+        "speedup": 7.295115079305743,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 8,
+        "channels": 2,
+        "ms": 2.18420900000001,
+        "baselineMs": 17.618374999999787,
+        "speedup": 8.066249612559837,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 8,
+        "channels": 2,
+        "ms": 8.15929099999994,
+        "baselineMs": 70.06679200000008,
+        "speedup": 8.587362799047197,
+        "exact": true
+      },
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 8,
+        "channels": 3,
+        "ms": 0.052083999999922526,
+        "baselineMs": 0.7876670000000559,
+        "speedup": 15.123012825459401,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 8,
+        "channels": 3,
+        "ms": 0.1547499999996944,
+        "baselineMs": 0.9827500000001237,
+        "speedup": 6.350565428123194,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 8,
+        "channels": 3,
+        "ms": 2.4684580000002825,
+        "baselineMs": 15.896582999999737,
+        "speedup": 6.439883927536105,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 8,
+        "channels": 3,
+        "ms": 9.84237499999972,
+        "baselineMs": 64.39695800000027,
+        "speedup": 6.542827112358765,
+        "exact": true
+      },
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 8,
+        "channels": 4,
+        "ms": 0.043333999999958905,
+        "baselineMs": 0.309458000000177,
+        "speedup": 7.1412285964939874,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 8,
+        "channels": 4,
+        "ms": 0.17295800000010786,
+        "baselineMs": 1.2729170000002341,
+        "speedup": 7.359688479280752,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 8,
+        "channels": 4,
+        "ms": 2.796792000000096,
+        "baselineMs": 20.076458999999886,
+        "speedup": 7.178388310607009,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 8,
+        "channels": 4,
+        "ms": 11.160249999999905,
+        "baselineMs": 80.05095800000026,
+        "speedup": 7.172864227951967,
+        "exact": true
+      },
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 16,
+        "channels": 1,
+        "ms": 0.036833000000115135,
+        "baselineMs": 0.3219579999999951,
+        "speedup": 8.741020280699066,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 16,
+        "channels": 1,
+        "ms": 0.12408400000003894,
+        "baselineMs": 1.268040999999812,
+        "speedup": 10.219214403141534,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 16,
+        "channels": 1,
+        "ms": 1.692709000000832,
+        "baselineMs": 19.38054100000045,
+        "speedup": 11.449422789145046,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 16,
+        "channels": 1,
+        "ms": 6.5399170000000595,
+        "baselineMs": 77.06845800000065,
+        "speedup": 11.784317446230578,
+        "exact": true
+      },
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 16,
+        "channels": 2,
+        "ms": 0.04108300000007148,
+        "baselineMs": 1.0013750000007349,
+        "speedup": 24.374437115083918,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 16,
+        "channels": 2,
+        "ms": 0.13258399999995163,
+        "baselineMs": 1.2657920000001468,
+        "speedup": 9.54709467206155,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 16,
+        "channels": 2,
+        "ms": 2.403958999999304,
+        "baselineMs": 19.951624999999694,
+        "speedup": 8.299486388913234,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 16,
+        "channels": 2,
+        "ms": 8.756457999999839,
+        "baselineMs": 79.70283399999971,
+        "speedup": 9.102177387249636,
+        "exact": true
+      },
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 16,
+        "channels": 3,
+        "ms": 0.05320800000026793,
+        "baselineMs": 0.7324580000004062,
+        "speedup": 13.7659374529529,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 16,
+        "channels": 3,
+        "ms": 0.21695900000031543,
+        "baselineMs": 1.0547499999993306,
+        "speedup": 4.861517613916902,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 16,
+        "channels": 3,
+        "ms": 3.0835839999999735,
+        "baselineMs": 17.14550000000054,
+        "speedup": 5.560250669351212,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 16,
+        "channels": 3,
+        "ms": 11.826958000000559,
+        "baselineMs": 65.48070800000005,
+        "speedup": 5.536563839999851,
+        "exact": true
+      },
+      {
+        "width": 64,
+        "height": 43,
+        "depth": 16,
+        "channels": 4,
+        "ms": 0.055416999999579275,
+        "baselineMs": 0.31850000000031287,
+        "speedup": 5.747333850672734,
+        "exact": true
+      },
+      {
+        "width": 128,
+        "height": 85,
+        "depth": 16,
+        "channels": 4,
+        "ms": 0.224250000000211,
+        "baselineMs": 1.327832999999373,
+        "speedup": 5.92121739129598,
+        "exact": true
+      },
+      {
+        "width": 512,
+        "height": 341,
+        "depth": 16,
+        "channels": 4,
+        "ms": 3.424250000000029,
+        "baselineMs": 20.932875000000422,
+        "speedup": 6.113126962108562,
+        "exact": true
+      },
+      {
+        "width": 1024,
+        "height": 683,
+        "depth": 16,
+        "channels": 4,
+        "ms": 14.045624999999745,
+        "baselineMs": 85.93866699999944,
+        "speedup": 6.118536341387514,
+        "exact": true
+      }
+    ]
+  },
+  "validation": {
+    "gpuPerformanceTests": "3 pass",
+    "jaxOracle": "11 cases pass",
+    "fullGpuSuite": "159 pass, 1 pre-existing failure",
+    "preExistingFailure": "Freezing colour changes one alpha gradient by 1 ULP on M2/legacy Dawn; same actual and expected values at commit 88d6d7c.",
+    "cpuValidation": "154 pass, 6 GPU tests skipped; JAX unit checks and Deno type checks pass",
+    "browserBuild": "pass"
+  },
+  "removedGpuOptimizerExperiment": {
+    "status": "Removed; historical experiment only",
+    "batchSize": 16,
+    "matrix": {
+      "canvasSizes": [
+        64,
+        128,
+        512,
+        1024
+      ],
+      "shapeCounts": [
+        64,
+        512,
+        4096
+      ],
+      "cells": 12,
+      "curvesPerShape": 4,
+      "blurPx": 1,
+      "steps": 96,
+      "repeats": 3,
+      "speedupRange": [
+        1.050052733360654,
+        3.7192322944791343
+      ],
+      "excludesFinalParameterReadback": true
+    },
+    "realImage": {
+      "image": "Kodak kodim02",
+      "curvesPerShape": 8,
+      "blur": "anneal 7 to 1",
+      "steps": 64,
+      "cells": 4,
+      "speedupRange": [
+        1.5299550782227467,
+        1.696863670523215
+      ],
+      "includesFinalParameterReadback": true,
+      "maxAbsolutePsnrDifferenceDb": 0.02860277310281134
+    }
+  }
+}

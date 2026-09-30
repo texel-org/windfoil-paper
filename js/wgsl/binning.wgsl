@@ -138,18 +138,24 @@ fn bin_fill(@builtin(global_invocation_id) gid : vec3<u32>) {
   }
 }
 
-// Restore painter order, one workgroup per tile: a 2k-entry workgroup bitonic
-// sort for typical tiles, with an exact comb-sort fallback for larger ones.
+// Restore painter order, one workgroup per tile: a workgroup bitonic sort
+// for typical tiles and an ordered parallel gather for larger ones.
 // Shared-memory capacity for the parallel sort, in entries. The default fits
 // WebGPU's guaranteed 16 KiB of workgroup storage; the host raises it to what
 // the device actually offers, which moves the point where a tile falls back to
-// the serial path. Must be a power of two: the bitonic network sorts a
+// the ordered gather. Must be a power of two: the bitonic network sorts a
 // power-of-two span.
 override SORT_CAPACITY : u32 = 2048u;
 const SORT_WG : u32 = 256u;
 
 var<workgroup> sortScratch : array<u32, SORT_CAPACITY>;
+var<workgroup> gatherScratch : array<u32, SORT_WG>;
 var<workgroup> sortInfo : vec2<u32>; // compact-list offset + length
+
+fn touches_tile(si : u32, tx : u32, ty : u32) -> bool {
+  let r = shape_tile_range(si);
+  return r.hit && tx >= r.tx0 && tx <= r.tx1 && ty >= r.ty0 && ty <= r.ty1;
+}
 
 @compute @workgroup_size(SORT_WG)
 fn bin_sort(@builtin(workgroup_id) wgid : vec3<u32>,
@@ -165,27 +171,38 @@ fn bin_sort(@builtin(workgroup_id) wgid : vec3<u32>,
   let info = workgroupUniformLoad(&sortInfo);
   let lo = info.x;
   let n = info.y;
-  let hi = lo + n;
   if (n <= 1u) { return; }
 
-  // Exact fallback for tiles larger than workgroup storage. It is serial, so it
-  // is a performance cliff -- raising SORT_CAPACITY is what keeps tiles off it.
+  // Each lane owns a consecutive interval of shape IDs. Count its hits,
+  // prefix-sum the counts, then emit in order. This reconstructs exactly the
+  // same list as count/fill/sort, without serial sorting or another global list.
+  // Membership must match bin_count/bin_fill: all use shape_tile_range.
+  // It costs O(nShapes), making it suitable for crowded tiles; sparse tiles
+  // retain the bitonic path, whose cost depends only on their own list length.
   if (n > SORT_CAPACITY) {
-    if (lid.x == 0u) {
-      var gap = n;
-      var swapped = true;
-      while (gap > 1u || swapped) {
-        gap = max((gap * 10u) / 13u, 1u);
-        swapped = false;
-        for (var i = lo; i + gap < hi; i++) {
-          let a = tileShapes[i];
-          let b = tileShapes[i + gap];
-          if (a > b) {
-            tileShapes[i] = b;
-            tileShapes[i + gap] = a;
-            swapped = true;
-          }
-        }
+    let tx = t % U.tilesX;
+    let ty = t / U.tilesX;
+    let chunk = (U.nShapes + SORT_WG - 1u) / SORT_WG;
+    let begin = lid.x * chunk;
+    let end = min(begin + chunk, U.nShapes);
+    var count = 0u;
+    for (var si = begin; si < end; si++) {
+      count += select(0u, 1u, touches_tile(si, tx, ty));
+    }
+    gatherScratch[lid.x] = count;
+    workgroupBarrier();
+    for (var offset = 1u; offset < SORT_WG; offset <<= 1u) {
+      var add = 0u;
+      if (lid.x >= offset) { add = gatherScratch[lid.x - offset]; }
+      workgroupBarrier();
+      gatherScratch[lid.x] += add;
+      workgroupBarrier();
+    }
+    var cursor = lo + gatherScratch[lid.x] - count;
+    for (var si = begin; si < end; si++) {
+      if (touches_tile(si, tx, ty)) {
+        tileShapes[cursor] = si;
+        cursor++;
       }
     }
     return;
