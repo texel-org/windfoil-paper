@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "farlev-highres",
+  "destination": "fixtures/wikimedia",
+  "source": "https://commons.wikimedia.org/wiki/File:A_dip_in_the_road_in_F%C3%A4rlev.jpg",
+  "license": "CC0 1.0; author W.carter.",
+  "protocol": {
+    "nativeResolution": [4925, 2770],
+    "benchmarkLongSides": [512, 1024, 2048, 4096]
+  },
+  "files": [
+    {
+      "path": "farlev-dip-in-road.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/A_dip_in_the_road_in_F%C3%A4rlev.jpg",
+      "bytes": 14041707,
+      "sha256": "242277090148fdc8b984f6b4b4fa43cd9a299396eb7dd656d5c00f6e44badada"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+cssutils==2.15.0
+matplotlib==3.11.0
+numpy==2.4.6
+Pillow==12.3.0
+scikit-image==0.26.0
+svgpathtools==1.7.2
+svgwrite==1.4.3
+websockets==16.1

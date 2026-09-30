@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/texel-org/windfoil-paper/bench/schema.json",
+  "title": "Windfoil benchmark cell",
+  "type": "object",
+  "required": ["schema_version", "run_id", "status", "engine", "workload", "budget"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "suite_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "status": { "enum": ["ok", "skipped", "error"] },
+    "engine": {
+      "type": "object",
+      "required": ["name", "environment", "backend"],
+      "properties": {
+        "name": { "type": "string" },
+        "environment": { "enum": ["deno", "deno-dawn", "node", "diffvg", "bezier"] },
+        "backend": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "workload": {
+      "type": "object",
+      "required": ["loss", "primitive", "n", "opt_size", "seed", "init"],
+      "properties": {
+        "loss": { "enum": ["l2", "clip"] },
+        "primitive": { "type": "string" },
+        "n": { "type": "integer", "minimum": 1 },
+        "k": { "type": ["integer", "null"], "minimum": 3 },
+        "opt_size": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "integer", "minimum": 1 }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "seed": { "type": "integer" },
+        "repeat": { "type": "integer", "minimum": 0 },
+        "target": { "type": ["string", "null"] },
+        "target_label": { "type": ["string", "null"] },
+        "source_id": { "type": ["string", "null"] },
+        "dataset": { "type": ["string", "null"] },
+        "protocol": { "type": ["string", "null"] },
+        "prompt": { "type": ["string", "null"] },
+        "init": { "type": "object" },
+        "variant": { "enum": ["anneal", "crisp", null] },
+        "engine_options": { "type": ["object", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "budget": {
+      "type": "object",
+      "required": ["mode", "requested", "clock"],
+      "properties": {
+        "mode": { "enum": ["steps", "seconds"] },
+        "requested": { "type": "number", "exclusiveMinimum": 0 },
+        "clock": { "const": "optimize" }
+      },
+      "additionalProperties": false
+    },
+    "progress": { "type": "object" },
+    "timing": { "type": "object" },
+    "loss": { "type": "object" },
+    "quality": { "type": "object" },
+    "system": { "type": "object" },
+    "provenance": { "type": ["object", "null"] },
+    "artifacts": {
+      "type": "object",
+      "description": "Paths relative to the suite directory. final_png is the engine's own full-quality render of its fitted scene (DiffVG at its --final-samples grid, not its 2x2 training render); final_svg is that scene as a fill SVG, written by Windfoil and DiffVG, whose fits are vector scenes, and null for Bézier Splatting, whose closed mode has no exact vector form.",
+      "properties": {
+        "final_png": { "type": "string" },
+        "final_svg": { "type": ["string", "null"] },
+        "trace": { "type": ["string", "null"] },
+        "quality_json": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "skip": { "type": "object" },
+    "error": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "skipped" } } },
+      "then": { "required": ["skip"] }
+    },
+    {
+      "if": { "properties": { "status": { "const": "error" } } },
+      "then": { "required": ["error"] }
+    },
+    {
+      "if": { "properties": { "status": { "const": "ok" } } },
+      "then": { "required": ["progress", "timing", "artifacts"] }
+    }
+  ],
+  "additionalProperties": true
+}

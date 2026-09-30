@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "id": "kodak24",
+  "destination": "fixtures/kodak",
+  "source": "https://r0k.us/graphics/kodak/",
+  "license": "Host states unrestricted usage; no formal license is supplied.",
+  "protocol": {
+    "images": 24,
+    "nativeResolution": true,
+    "shapeCounts": [256, 512, 1024],
+    "aggregation": "mean"
+  },
+  "files": [
+    { "path": "kodim01.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim01.png", "bytes": 736501, "sha256": "a56e27cbf5f843c048b6af1d6e090760e9c92fadba88b7dee0205918a37523bd" },
+    { "path": "kodim02.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim02.png", "bytes": 617995, "sha256": "4f4b74a79237e311d72cad958237b5f7088d8bce1c82305ebefe1a70e3022dfd" },
+    { "path": "kodim03.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim03.png", "bytes": 502888, "sha256": "e25ca1ff2f0c0cb5fdfd5f9b0a0bb21ac4c3de3c84a67f35b09a85d3306249db" },
+    { "path": "kodim04.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim04.png", "bytes": 637432, "sha256": "e3b946107c5d3441c022f678d0c3caf1e224d81b1604ba840a4f88e562de61aa" },
+    { "path": "kodim05.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim05.png", "bytes": 785610, "sha256": "10349e963c5c813d327852f82c1795fa4148d69fedffc4c589bee458e3ac3d53" },
+    { "path": "kodim06.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim06.png", "bytes": 618959, "sha256": "363510303b715d4cbc384e1ce227e466b613a09e1b71ae985882bf8e7fbd9b18" },
+    { "path": "kodim07.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim07.png", "bytes": 566322, "sha256": "b77d3f006f42414bb242222e0482e750c0fb9e5ee8d4bed2f6f11c5605fe54a4" },
+    { "path": "kodim08.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim08.png", "bytes": 788470, "sha256": "ba23983c76b4832ee0e8af0592664756841a16779acd69f792e268fb6d13d6e7" },
+    { "path": "kodim09.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim09.png", "bytes": 582899, "sha256": "6a4361c2fc194feb4edaa9f9a4a0620fb9943e460ac7fdf037fb0f6dd6607a7d" },
+    { "path": "kodim10.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim10.png", "bytes": 593463, "sha256": "9dfb70f5867c29ff9ed6313683f19b3d867849e40fbc0c4c54a4a89df341cf23" },
+    { "path": "kodim11.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim11.png", "bytes": 621023, "sha256": "7936814b58b5387fce2e4e2488b4ec830dadd95fa9520f358ddb30990b50f2b6" },
+    { "path": "kodim12.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim12.png", "bytes": 531024, "sha256": "d78c37c2f04f23761ed2367dd77e2db584ddd4c3950833fecf89f199a8126980" },
+    { "path": "kodim13.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim13.png", "bytes": 822712, "sha256": "bc34a3ce58dea09dce1704c997171602de90cb34d0c8503a988b77f473d39b08" },
+    { "path": "kodim14.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim14.png", "bytes": 692201, "sha256": "55a94550ff18f3246c4074fd32b77b0c74447c26b6ad274d564d999c0450ba6e" },
+    { "path": "kodim15.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim15.png", "bytes": 612582, "sha256": "7538cbb80cb9103606c48b806eae57d56c885c7f90b9b3be70a41160f9cbb683" },
+    { "path": "kodim16.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim16.png", "bytes": 534247, "sha256": "a89c7268ccd4718ba424a99fc4643c572cf692ca6eae887185ceb4e9f11d2e54" },
+    { "path": "kodim17.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim17.png", "bytes": 602078, "sha256": "37afcc89fbdcb76d9518e04b2fc011027e2f4cd14b3b2f83cefd721641a47c5b" },
+    { "path": "kodim18.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim18.png", "bytes": 780947, "sha256": "1a9258c365988961d87a0598725b609139c303ad48a5aad6c503c3b1a87849aa" },
+    { "path": "kodim19.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim19.png", "bytes": 671476, "sha256": "b7450b264b1b0a411390d8931b112c27905a992520fc90569dc4b920aa32bbdc" },
+    { "path": "kodim20.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim20.png", "bytes": 492462, "sha256": "3b46c71e3b92a563820ba32936be8330c586c41f938efd94be938386aae4328a" },
+    { "path": "kodim21.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim21.png", "bytes": 637051, "sha256": "ac958597c82073f6bb65129c68f72b651db5b9efd82e11547d07350214bc268b" },
+    { "path": "kodim22.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim22.png", "bytes": 701970, "sha256": "1cee58eb1f2d9c7ebb254d208a03c783ce6cf2c4d8c2cf45e235dd23b4ce1b29" },
+    { "path": "kodim23.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim23.png", "bytes": 557596, "sha256": "e3111a2fd4da24af15d6459ef9eacfe54106b38e27b4a21821b75c3f5d2d5baf" },
+    { "path": "kodim24.png", "url": "https://r0k.us/graphics/kodak/kodak/kodim24.png", "bytes": 706397, "sha256": "1071c68372cc5a01435c2c225a5cf7d4bb803846ec08bb6b3d6721b156d7cb96" }
+  ]
+}

@@ -1,0 +1,20 @@
+# TODO before publishing: the `preferred-citation` block below needs the paper's
+# real metadata (title, author list, year, and arXiv id or DOI). The values
+# marked TODO are placeholders, not facts.
+cff-version: 1.2.0
+message: "If you use this code, please cite the paper below."
+title: "Windfoil reference code"
+type: software
+authors:
+  - family-names: DesLauriers
+    given-names: Matt
+license: Apache-2.0
+repository-code: "https://github.com/texel-org/windfoil-paper"
+preferred-citation:
+  type: article
+  title: "TODO: paper title"
+  authors:
+    - family-names: DesLauriers
+      given-names: Matt
+  year: 2026
+  url: "TODO: https://arxiv.org/abs/XXXX.XXXXX"

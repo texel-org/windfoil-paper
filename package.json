@@ -1,0 +1,48 @@
+{
+  "name": "windfoil-paper",
+  "private": true,
+  "description": "Reference code for the Windfoil paper: analytic vector-graphics rendering and its VJP in one WebGPU shader, a JAX oracle, demos, and a benchmark harness.",
+  "license": "Apache-2.0",
+  "author": "Matt DesLauriers",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/texel-org/windfoil-paper.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "demo:l2": "node tools/run-demo.js l2",
+    "demo:roundtrip": "node tools/run-demo.js roundtrip",
+    "demo:clip": "node tools/run-demo.js clip",
+    "demo:lines": "node tools/run-demo.js lines",
+    "demo:plot": "node tools/run-demo.js plot",
+    "render": "node tools/run-demo.js render",
+    "clip:server": ".venv/bin/python demos/clip/loss_server.py",
+    "web:demo": "vite --config demos/web/vite.config.js",
+    "web:build": "vite build --config demos/web/vite.config.js",
+    "web:preview": "vite preview --config demos/web/vite.config.js",
+    "fixtures": "node tools/fetch-fixtures.js all",
+    "fixtures:farlev": "node tools/fetch-fixtures.js farlev-highres",
+    "bench": "node bench/run.js",
+    "bench:suite": "node bench/suite.js",
+    "test": "node --test tools/test/*.test.js",
+    "test:jax": ".venv/bin/python jax/test_oracle.py",
+    "test:oracle": "node tools/oracle/check.js",
+    "check:deno": "deno check demos/cli.js demos/render/cli.js demos/roundtrip/cli.js",
+    "validate": "npm test && npm run test:jax && npm run check:deno"
+  },
+  "dependencies": {
+    "@texel/color": "^1.1.11",
+    "fast-png": "8.0.0",
+    "fflate": "^0.8.2",
+    "jpeg-js": "0.4.4",
+    "png-tools": "^1.1.1",
+    "webgpu": "0.4.0",
+    "webgpu-legacy": "npm:webgpu@0.3.0"
+  },
+  "devDependencies": {
+    "vite": "6.4.3"
+  }
+}

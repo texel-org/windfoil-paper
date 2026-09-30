@@ -1,0 +1,5 @@
+numpy==2.4.6
+open_clip_torch==3.3.0
+torch==2.11.0
+torchvision==0.26.0
+websockets==16.1

@@ -1,0 +1,10 @@
+jaxtyping==0.3.3
+matplotlib==3.10.7
+numpy==2.1.2
+opencv-python-headless==5.0.0.93
+Pillow==11.3.0
+pytorch-msssim==1.0.0
+PyYAML==6.0.3
+rich==14.2.0
+scikit-image==0.25.2
+tqdm==4.67.1

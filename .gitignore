@@ -1,0 +1,25 @@
+.DS_Store
+.venv/
+.venv-*/
+node_modules/
+output/
+demos/web/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+# Model checkpoints: the CLIPAG weights download next to the loss server.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.download
+# No fixture imagery is published. The manifests are the download recipe --
+# public URLs, byte counts and SHA256 only -- and `npm run bench` cannot fetch
+# or verify a fixture on a fresh clone without them.
+fixtures/*
+!fixtures/README.md
+!fixtures/manifests/
+!fixtures/manifests/**
+
+.claude/

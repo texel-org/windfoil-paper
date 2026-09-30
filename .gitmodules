@@ -1,0 +1,6 @@
+[submodule "bench/bezier/upstream"]
+	path = bench/bezier/upstream
+	url = https://github.com/xiliu8006/Bezier_splatting.git
+[submodule "bench/bezier/gsplat"]
+	path = bench/bezier/gsplat
+	url = https://github.com/XingtongGe/gsplat.git
