@@ -207,6 +207,59 @@ The alternatives are `bench:suite` flags, `--windfoil-variant=anneal` and
 `--windfoil-style=anchor`; `npm run bench` always runs the plan's configuration
 and rejects them.
 
+## Comparing Windfoil revisions on Färlev
+
+To compare a performance branch with an earlier commit on one machine, use the
+original suite's `inputs/` directory (its prepared 512 × 288 target and shared
+N=512, K=8 initialization):
+
+```sh
+node tools/perf-farlev.js \
+  --inputs=output/pod-2026-09-29-rtx2000ada/farlev-300s/suites/farlev-300s/inputs \
+  --baseline=88d6d7c --candidate=1cc8e36 --out=output/farlev-perf
+python3 tools/perf-farlev-plot.py output/farlev-perf
+```
+
+Only Windfoil runs. The script snapshots each committed revision, shares the
+installed Node dependencies, and launches each cell in a fresh Node process.
+It reproduces the crisp raw-RGB/learned-alpha configuration and learning rates
+of the original 300-second suite. No image download, resizing of the original
+JPEG, or other engine is involved.
+
+The default runs ten pairs of 50 steps, alternating which revision runs first.
+Startup is measured from process launch to the first optimization step and
+included in the plots. `--steps=800 --repeats=4 --seconds=300` adds a longer
+comparison with the original time budget. The seconds budget counts optimization
+only, matching the original; `--seconds-repeats=2` repeats the long comparison
+with reversed order. `--steps` and `--repeats` adjust the fixed-step comparison;
+the schedule stays pinned to the original 800 steps.
+`--first=candidate` starts with the candidate revision for an independent
+comparison in reverse order.
+
+`--n=2048` tests a different shape count. If its `init-n2048-s1.json` exists
+in the input suite, it is reused. Otherwise the script generates it once using
+the same neutral initialization helper as `bench:suite`, with seed 1 and the
+original background. Both revisions receive that exact file, saved under the
+comparison's `inputs/`; the original suite is left intact.
+
+To compare sort capacities, use the same commit for both revisions and set
+`--baseline-sort=default --candidate-sort=256`. These options set
+`WF_SORT_CAPACITY` independently in each child process. The synthetic
+`tools/perf.js --sort=default,32,128,256,512,2048` sweep also reports actual
+tile-list sizes, the fraction of tiles using gather, and exact image/loss/gradient
+equivalence. See [the threshold findings](../docs/performance.md#sort-threshold-sweep)
+before choosing a global cutoff.
+
+`summary.json` reports arithmetic means, medians, timing variation, speed ratios,
+step counts, final floating-point render PSNR, and exact equivalence of the
+fixed-step PNGs and loss trajectories.
+`measurements.json` records every run; each cell retains the CLI artifacts and
+logs. The optional plotting script uses the existing benchmark report's
+matplotlib dependency and writes SVG, PDF, and PNG. Use a new output directory
+for each comparison; existing results are never overwritten. This measures a
+single renderer's training workload; device-cache reuse and dense-tile overflow
+gains depend on other workloads.
+
 ## Report
 
 The sweep prints the exact command to paste when it finishes, naming an

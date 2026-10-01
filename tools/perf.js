@@ -1,16 +1,18 @@
 // Focused, deterministic renderer benchmark; no image downloads or encoding.
 // Usage: node tools/perf.js --out=output/perf/run.json
 // --source=output/perf/baseline selects a saved source tree for A/B runs.
+// --sort=default,32,128,256,512,2048 sweeps static-scene sort capacities.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cpus, release } from 'node:os';
+import { createHash } from 'node:crypto';
 
 const args = Object.fromEntries(process.argv.slice(2).map((arg) => {
   const [key, ...value] = arg.replace(/^--/, '').split('=');
   return [key, value.join('=') || '1'];
 }));
-const options = new Set(['source', 'out', 'gpu', 'cases', 'repeats', 'steps', 'style', 'k', 'blur', 'warmup', 'optimize', 'blend']);
+const options = new Set(['source', 'out', 'gpu', 'cases', 'repeats', 'steps', 'style', 'k', 'blur', 'warmup', 'optimize', 'blend', 'sort']);
 for (const key of Object.keys(args)) if (!options.has(key)) throw new Error(`unknown option --${key}`);
 const integer = (name, fallback, minimum = 1) => {
   const value = Number(args[name] ?? fallback);
@@ -29,6 +31,15 @@ if (cases.some(([size, n, radius], i) => cases[i].length !== 3 || !Number.isInte
   throw new Error('cases must contain positive size:n:radius triples');
 }
 const source = resolve(args.source ?? '.');
+const capacities = args.sort ? args.sort.split(',').map((value) => {
+  if (value === 'default') return value;
+  const capacity = Number(value);
+  if (!Number.isInteger(capacity) || capacity < 2 || (capacity & (capacity - 1)) !== 0) {
+    throw new Error('sort must contain default or powers of two >= 2');
+  }
+  return capacity;
+}) : [null];
+if (args.sort && args.optimize === '1') throw new Error('sort sweep uses static scenes; omit --optimize');
 const load = (name) => import(pathToFileURL(`${source}/js/${name}.js`));
 const started = performance.now();
 const { Renderer, requestDevice, getWebGPUHostInfo } = await load('renderer');
@@ -45,7 +56,8 @@ const measure = async (fn) => {
 };
 const summary = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
-  return { median: sorted[Math.floor(sorted.length / 2)],
+  return { mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+    median: sorted[Math.floor(sorted.length / 2)],
     p90: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))],
     min: sorted[0], max: sorted.at(-1) };
 };
@@ -123,7 +135,7 @@ function instrument(device, records, capture) {
 // Diagnostic replay brackets each dispatch with GPU timestamps. Splitting the
 // compute passes changes scheduling, so these explain bottlenecks; the normal
 // step's wall time above remains the performance comparison.
-async function profile(device, renderer, capture) {
+async function profile(device, renderer, capture, repeats = 5) {
   if (!device.features.has('timestamp-query')) return null;
   capture.commands = [];
   await renderer.stepGpuLoss();
@@ -138,7 +150,7 @@ async function profile(device, renderer, capture) {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
   try {
     const samples = [];
-    for (let repeat = 0; repeat < 5; repeat++) {
+    for (let repeat = 0; repeat < repeats; repeat++) {
       const enc = device.createCommandEncoder();
       let at = 0;
       for (const command of commands) {
@@ -161,9 +173,36 @@ async function profile(device, renderer, capture) {
   } finally { queries.destroy(); resolved.destroy(); staging.destroy(); }
 }
 
+async function tileStats(device, renderer) {
+  const bytes = (renderer.nTiles + 1) * 4;
+  const staging = device.createBuffer({ size: bytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+  try {
+    const enc = device.createCommandEncoder();
+    enc.copyBufferToBuffer(renderer.tileOffsetBuf, 0, staging, 0, bytes);
+    device.queue.submit([enc.finish()]);
+    await staging.mapAsync(GPUMapMode.READ);
+    const offsets = new Uint32Array(staging.getMappedRange());
+    const lengths = Array.from({ length: renderer.nTiles }, (_, i) => offsets[i + 1] - offsets[i]);
+    const sorted = [...lengths].sort((a, b) => a - b);
+    return { capacity: renderer.sortCapacity, mean: offsets[renderer.nTiles] / renderer.nTiles,
+      median: sorted[Math.floor(sorted.length / 2)], p95: sorted[Math.floor(sorted.length * 0.95)],
+      max: sorted.at(-1), gatherTiles: lengths.filter((n) => n > renderer.sortCapacity).length,
+      tiles: renderer.nTiles };
+  } finally { staging.destroy(); }
+}
+
+function outputHash(gradient, image) {
+  const hash = createHash('sha256').update(String(gradient.loss));
+  for (const array of [gradient.curveGrads, gradient.shapeGrads, image]) {
+    hash.update(new Uint8Array(array.buffer, array.byteOffset, array.byteLength));
+  }
+  return hash.digest('hex');
+}
+
 async function run() {
   const requested = await measure(() => requestDevice({ timestampQuery: args.gpu === '1' }));
   const nativeDevice = requested.value;
+  const originalCapacity = process.env.WF_SORT_CAPACITY;
   nativeDevice.pushErrorScope('validation');
   const records = [];
   const capture = { names: new Map(), commands: null };
@@ -176,60 +215,83 @@ async function run() {
     cases: [],
   };
   try {
-    for (const [size, n, radius] of cases) {
+    for (const [caseIndex, [size, n, radius]] of cases.entries()) {
       for (let repeat = 0; repeat < repeats; repeat++) {
-        const model = modelFor(size, n, radius);
-        const lrs = Object.fromEntries(Object.keys(model.params).map((key) => [key, { lr: 0.01 }]));
-        const adam = new Adam(model.params, lrs);
-        const target = new Float32Array(size * size * 4).fill(0.3);
-        const settings = { s: [blur, blur], bg: [1, 1, 1] };
-        const compilationStart = records.length;
-        const init = await measure(() => Renderer.create(device, {
-          width: size, height: size, maxShapes: n, maxPieces: model.maxPieces,
-          maxCurves: model.maxCurves, train: { alpha: model.style.trainsAlpha }, blend: args.blend,
-        }));
-        const r = init.value;
-        try {
-          const scene = model.decode().scene;
-          const upload = await measure(() => { r.uploadScene(scene, settings); r.uploadTarget(target); });
-          const first = await measure(() => r.stepGpuLoss());
-          for (let i = 0; i < warmup; i++) await r.stepGpuLoss();
-          const samples = { decode: [], upload: [], gpuAndReadback: [], pullback: [], adam: [], total: [] };
-          let loss;
-          for (let i = 0; i < steps; i++) {
-            const t0 = performance.now();
-            const decoded = model.decode();
-            const t1 = performance.now();
-            r.uploadScene(decoded.scene, settings);
-            const t2 = performance.now();
-            const grad = await r.stepGpuLoss();
-            const t3 = performance.now();
-            const grads = model.pullback(grad);
-            const t4 = performance.now();
-            if (args.optimize === '1') adam.step(model.params, grads);
-            const t5 = performance.now();
-            samples.decode.push(t1 - t0); samples.upload.push(t2 - t1);
-            samples.gpuAndReadback.push(t3 - t2); samples.pullback.push(t4 - t3);
-            samples.adam.push(t5 - t4); samples.total.push(t5 - t0);
-            loss = grad.loss;
-          }
-          const cell = { size, n, radius, k: model.k, repeat, initMs: init.ms,
-            uploadMs: upload.ms, firstStepMs: first.ms,
-            readyMs: init.ms + upload.ms + first.ms,
-            timings: Object.fromEntries(Object.entries(samples).map(([key, values]) => [key, summary(values)])),
-            culling: r.getCullingInfo(), loss,
-            compilation: records.slice(compilationStart) };
-          if (args.gpu === '1') cell.gpuStages = await profile(nativeDevice, r, capture);
-          result.cases.push(cell);
-          console.log(JSON.stringify({ size, n, radius, repeat, readyMs: cell.readyMs,
-            totalMs: cell.timings.total.median, gpuMs: cell.timings.gpuAndReadback.median }));
-        } finally { r.destroy(); }
+        // Rotate and reverse the order to distribute warmup and timing drift.
+        const direction = repeat % 2 ? [...capacities].reverse() : capacities;
+        const shift = caseIndex + Math.floor(repeat / 2) * 3;
+        const order = direction.map((_, i) => direction[(i + shift) % direction.length]);
+        for (const capacity of order) {
+          if (capacity === 'default') delete process.env.WF_SORT_CAPACITY;
+          else if (capacity !== null) process.env.WF_SORT_CAPACITY = String(capacity);
+          const model = modelFor(size, n, radius);
+          const lrs = Object.fromEntries(Object.keys(model.params).map((key) => [key, { lr: 0.01 }]));
+          const adam = new Adam(model.params, lrs);
+          const target = new Float32Array(size * size * 4).fill(0.3);
+          const settings = { s: [blur, blur], bg: [1, 1, 1] };
+          const compilationStart = records.length;
+          const init = await measure(() => Renderer.create(device, {
+            width: size, height: size, maxShapes: n, maxPieces: model.maxPieces,
+            maxCurves: model.maxCurves, train: { alpha: model.style.trainsAlpha }, blend: args.blend,
+          }));
+          const r = init.value;
+          try {
+            const scene = model.decode().scene;
+            const upload = await measure(() => { r.uploadScene(scene, settings); r.uploadTarget(target); });
+            const first = await measure(() => r.stepGpuLoss());
+            for (let i = 0; i < warmup; i++) await r.stepGpuLoss();
+            const samples = { decode: [], upload: [], gpuAndReadback: [], pullback: [], adam: [], total: [] };
+            let loss;
+            for (let i = 0; i < steps; i++) {
+              const t0 = performance.now();
+              const decoded = model.decode();
+              const t1 = performance.now();
+              r.uploadScene(decoded.scene, settings);
+              const t2 = performance.now();
+              const grad = await r.stepGpuLoss();
+              const t3 = performance.now();
+              const grads = model.pullback(grad);
+              const t4 = performance.now();
+              if (args.optimize === '1') adam.step(model.params, grads);
+              const t5 = performance.now();
+              samples.decode.push(t1 - t0); samples.upload.push(t2 - t1);
+              samples.gpuAndReadback.push(t3 - t2); samples.pullback.push(t4 - t3);
+              samples.adam.push(t5 - t4); samples.total.push(t5 - t0);
+              loss = grad.loss;
+            }
+            const cell = { size, n, radius, k: model.k, repeat, initMs: init.ms,
+              uploadMs: upload.ms, firstStepMs: first.ms,
+              readyMs: init.ms + upload.ms + first.ms,
+              timings: Object.fromEntries(Object.entries(samples).map(([key, values]) => [key, summary(values)])),
+              culling: r.getCullingInfo(), loss,
+              compilation: records.slice(compilationStart) };
+            if (args.sort) {
+              cell.sort = capacity;
+              cell.tileStats = await tileStats(nativeDevice, r);
+              cell.outputHash = outputHash(await r.stepGpuLoss(), await r.readImage());
+            }
+            if (args.gpu === '1') cell.gpuStages = await profile(nativeDevice, r, capture, args.sort ? 20 : 5);
+            result.cases.push(cell);
+            console.log(JSON.stringify({ size, n, radius, repeat, sort: capacity ?? undefined, readyMs: cell.readyMs,
+              totalMs: cell.timings.total.median, gpuMs: cell.timings.gpuAndReadback.median }));
+          } finally { r.destroy(); }
+        }
       }
     }
   } finally {
+    if (originalCapacity === undefined) delete process.env.WF_SORT_CAPACITY;
+    else process.env.WF_SORT_CAPACITY = originalCapacity;
     const error = await nativeDevice.popErrorScope();
     nativeDevice.destroy();
     if (error) throw new Error(`GPU validation failed: ${error.message}`);
+  }
+  if (args.sort) {
+    for (const [size, n, radius] of cases) {
+      const hashes = new Set(result.cases.filter((cell) => cell.size === size && cell.n === n && cell.radius === radius)
+        .map((cell) => cell.outputHash));
+      if (hashes.size !== 1) throw new Error(`sort sweep changed output/gradients: ${size}:${n}:${radius}`);
+    }
+    result.sortOutputsIdentical = true;
   }
   const file = resolve(args.out ?? 'output/perf/latest.json');
   await mkdir(dirname(file), { recursive: true });

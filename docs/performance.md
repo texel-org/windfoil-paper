@@ -94,6 +94,118 @@ and merging the ordinary CPU optimizer's two submissions into one. The analytic
 coverage and VJP math remain unchanged. The shader is not proven optimal; the
 measurements identify the expensive stage and rule out these particular changes.
 
+## Sort threshold sweep
+
+Lowering `WF_SORT_CAPACITY` reduces the bitonic scratch allocation and sends
+tiles with longer lists through ordered gather sooner. The gather scans all N
+shape bounds twice per tile; its crossover therefore depends on both N and
+the tile's own list length. There is no universal best cutoff at 32 or 256.
+
+The local sweep tested capacities 32–4096 and the default, using 50 static
+evaluations per trial. Twelve workloads cover 64–1024 px, N=64–8192, and
+small through heavily overlapping loops, with three repeats. Six representative
+workloads were repeated four times with K=8 and diagnostic GPU timestamps;
+an N-aware early-gather experiment was also tested at K=8 with 1 px and 7 px
+filters. Every capacity produced identical images, loss, and geometry/color
+gradients. These are local Apple M2 measurements.
+
+The table gives GPU **sort-stage** times for K=8, 1 px filter, using the median
+of the mean of 20 timestamp replays per trial. Replay passes change scheduling,
+and native timestamps are quantized around 65.5 µs; averaging reduces that
+granularity. These values describe the sorting tradeoff, not training speedup.
+
+| Scene | Mean entries/tile | Default sort time | Lower cutoff | Sort time |
+| --- | ---: | ---: | ---: | ---: |
+| 128², N=512, crowded | 247 | 0.131 ms | 64 | 0.038 ms |
+| 128², N=2048, crowded | 1021 | 0.655 ms | 256 | 0.139 ms |
+| 512², N=4096, moderate overlap | 318 | 0.628 ms | 256 | 1.034 ms |
+| 512², N=8192, sparse | 153 | 0.449 ms | 32 | 2.790 ms |
+| 1024², N=4096, sparse | 59 | 0.742 ms | 32 | 4.878 ms |
+
+For the crowded N=2048 case, the complete static-evaluation median improved
+from 3.478 to 2.972 ms at 256 (1.17×). In contrast, the larger sparse scenes
+took about 17–18% longer per complete evaluation at 32. Even 256 regressed
+the moderate-overlap N=4096 case. Capacities at or above a tile's maximum
+list length can still affect performance by changing workgroup storage, without
+ever activating gather.
+
+Actual Färlev training was compared on the performance commit against itself,
+with default versus 32/128/256/512, 50 steps and six paired fresh-process trials
+per setting. All loss trajectories and final PNGs were identical:
+
+| Cutoff | N=512 mean speed ratio | N=2048 mean speed ratio |
+| --- | ---: | ---: |
+| 32 | 0.999× | 0.952× |
+| 128 | 1.025× | 1.006× |
+| 256 | 1.008× | 0.950× |
+| 512 | 1.017× | 0.928× |
+
+Small-workload wall timings varied substantially, so the small ratios should
+not be treated as universal gains or regressions. The fits establish no
+consistent training benefit from lowering the default. **The renderer retains
+its existing adaptive 2048/4096 capacity on this M2.** Lower capacities are
+useful for a known crowded workload, where the sweep supports roughly 64–128
+at N=512 and 256–512 at N=2048.
+
+The experimental predicate `n > SORT_CAPACITY || n > max(64, N/4)` reduced
+dense sort costs and avoided the full-scene scans in the sparse examples,
+but did not establish a broad end-to-end improvement. It is retained only in
+ignored `output/perf/sort-density-probe/`, with its benchmark copy
+`output/perf/perf-sort-density.js`; it adds no runtime flags or shader logic
+to the reference implementation.
+
+Raw results and a compact reduction are in
+`output/perf/sort-sweep-{screen,validation-k8}.json`,
+`output/perf/sort-density-validation{,-blur7}.json`, and
+`output/perf/sort-threshold-summary.json`. The comparison figure is
+`output/perf/sort-threshold-comparison.{svg,pdf,png}`. Reproduce a fixed-capacity
+sweep with:
+
+```sh
+node tools/perf.js --sort=default,32,64,128,256,512,1024,2048 \
+  --cases=128:2048:0.3,512:8192:0.04 --steps=50 --repeats=4 --gpu=1 --k=8
+```
+
+## Färlev training comparison
+
+A follow-up compares `88d6d7c` with `1cc8e36` using the exact prepared target
+and shared initialization from the Färlev 300-second suite: 512 × 288, N=512,
+K=8, raw sigmoid RGB, learned alpha, color LR 0.1, and a constant 1 px filter.
+The machine and runtime are the Apple M2/Dawn configuration above, on AC power.
+Each trial starts a fresh Node process; revision order alternates. The requested
+short comparison uses **50 steps and ten trials per revision**.
+
+| Arithmetic mean | Before | Performance commit | Speed ratio |
+| --- | ---: | ---: | ---: |
+| 50 optimization steps | 195.30 ms | 187.90 ms | 1.039× |
+| Complete Node process | 420.47 ms | 404.41 ms | 1.040× |
+| Launch to optimization start | 153.70 ms | 138.50 ms | 1.110× |
+
+All twenty trials produced identical loss trajectories and final PNGs, with
+final floating-point PSNR 20.9371 dB. Mean per-step times were 3.906 and
+3.758 ms; the standard deviations across trials were 0.266 and 0.299 ms.
+The measured difference is small relative to timing variation; these data
+demonstrate no dramatic training speedup for this workload.
+
+The dense-tile gather cannot activate at N=512: no tile can exceed the default
+2,048-entry bitonic capacity. This test also uses one renderer and a target
+already at optimization size, so it exercises little device-cache reuse or
+target-resizing work.
+
+An initial four-pair 800-step comparison measured a 1.056× median optimization
+ratio. A single 300-second pair instead completed 35,204 baseline steps versus
+31,002 candidate steps (0.881×), with final PSNR 22.0174 versus 22.0185 dB.
+These inconsistent sustained timings are not evidence of a reliable speedup.
+A reverse-order long comparison was stopped when the requested budget changed
+to 50 steps; its partial artifacts are not included in the short-run means.
+
+The reusable command and plot instructions are in
+[the benchmark README](../bench/README.md#comparing-windfoil-revisions-on-färlev).
+Raw short-run measurements, source snapshots, per-trial artifacts, `summary.json`,
+and `comparison.{svg,pdf,png}` are in ignored
+`output/farlev-perf-mac-50steps-2026-09-30/`. The initial longer runs are in
+`output/farlev-perf-mac-2026-09-30/`.
+
 ## Startup findings
 
 The historical benchmark's `startup_ms` means process spawn to the first

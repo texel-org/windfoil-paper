@@ -28,6 +28,7 @@
     "bench": "node bench/run.js",
     "bench:suite": "node bench/suite.js",
     "perf": "node tools/perf.js",
+    "perf:farlev": "node tools/perf-farlev.js",
     "perf:image": "node tools/perf-image.js",
     "test": "node --test tools/test/*.test.js",
     "test:jax": ".venv/bin/python jax/test_oracle.py",
