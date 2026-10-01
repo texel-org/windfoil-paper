@@ -1,20 +1,11 @@
 # WebGPU/JAX parity
 
-Run the deterministic forward and VJP checks for both `nonzero` and `evenodd`
-with Node/Dawn:
+Requires the root JavaScript install, a WebGPU GPU, and JAX in `.venv`
+(or another interpreter selected by `PYTHON`).
 
 ```sh
-node tools/oracle/check.js
+npm run test:oracle
+node tools/oracle/check.js output/oracle  # retain exchanged JSON files
 ```
 
-The micro-edge case keeps a real 0.001-unit segment at a large coordinate so a
-relative degeneracy cutoff cannot silently reopen a contour. The evenodd case
-mixes both rules and unequal per-shape curve counts so the exchange also
-exercises the JAX oracle's ragged-scene path.
-
-JAX must be installed in `.venv`, or set `PYTHON` to another interpreter. Pass
-an ignored output directory to retain the exchanged JSON files:
-
-```sh
-node tools/oracle/check.js output/oracle
-```
+Checks forward renders and VJPs for `nonzero` and `evenodd` fill rules.
