@@ -3,7 +3,7 @@
 Options for `demo:l2`, `demo:clip`, `demo:lines`, and `demo:plot`.
 Pass flags after `--`: `npm run demo:l2 -- --n=1024`.
 Shared parsing lives in [demos/util/run.js](../demos/util/run.js).
-`render` and `demo:roundtrip` use separate options; see the [README](../README.md).
+`render` and `demo:roundtrip` use separate options listed below.
 
 ## Common flags
 
@@ -96,3 +96,32 @@ Optional kernel comparison switches:
 | `WF_SCAN=serial` | Use the serial tile-offset scan. |
 | `WF_FUSE_L2=0` | Run forward and L2 gradient as separate passes. |
 | `WF_SORT_CAPACITY=N` | Force tile sort capacity; N must be a power of two. |
+
+## SVG commands
+
+`render`: `--svg=PATH` accepts files or a directory. `--dimension=N` sets the
+longest side (default 1024); `--width=N --height=N` sets exact dimensions.
+Other options: `--scale-mode=expand|letterbox`, `--letterbox-color=COLOR`,
+`--background=COLOR`, `--depth=8|16`, `--dpi=N`, `--chunk=N`, `--debug`, `--out=PATH`.
+An embedded background rect takes precedence over `--background`.
+
+SVG inputs support solid fills, an optional background rect, and closed
+`M/L/H/V/Q/Z` paths with either fill rule. Strokes, transforms, CSS, filters,
+and references are rejected. Large raster outputs are limited by host memory.
+
+`demo:roundtrip`: `--svg=PATH`, `--opt-size=N`, `--steps=N`,
+`--offset=x,y` (initial translation in SVG units), `--save-every=N`, `--out=PATH`.
+
+## Runtime and checks
+
+Node is the default. Set `WF_RUNTIME=deno` or `WF_RUNTIME=deno-dawn` for Deno 2.
+The Dawn addon requires macOS 15+; on macOS 13/14 use Node or built-in Deno WebGPU.
+Without npm:
+
+```sh
+WF_WEBGPU_BACKEND=wgpu deno run --unstable-webgpu -A --node-modules-dir=auto demos/cli.js l2
+```
+
+`npm run test:jax` runs JAX checks; `npm run check:deno` checks Deno imports.
+`PYTHON` overrides the parity check's `.venv` interpreter.
+`node tools/oracle/check.js output/oracle` retains exchanged JSON files.
