@@ -13,7 +13,7 @@ import {
 test('roundtrip CLI has strict, portable defaults and parses its complete surface', () => {
   assert.deepEqual(parseRoundtripArgs([]), {
     svg: 'demos/roundtrip/star-evenodd.svg',
-    optSize: 128,
+    optSize: 512,
     steps: 100,
     blur: 7,
     offset: null,

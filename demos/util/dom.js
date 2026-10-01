@@ -12,9 +12,24 @@ export function integerParam(params, name, fallback, max = Infinity, min = 1) {
   return boundedInteger(value == null ? fallback : value, fallback, min, max);
 }
 
-// Cover-fit box centering source WxH inside a square of the given side.
-export function cover(width, height, side) {
-  const scale = Math.max(side / width, side / height);
-  const w = width * scale, h = height * scale;
-  return { x: (side - w) / 2, y: (side - h) / 2, w, h };
+// 1080p fits a 1920 × 1080 box; numeric sizes cap the longest side.
+// Neither setting enlarges the source.
+export function imageSize(width, height, size = '1080p') {
+  const scale = size === '1080p'
+    ? Math.min(1, 1920 / width, 1080 / height)
+    : Math.min(1, Number(size) / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+// Export always fills the 1080p bounds, including for smaller input images.
+export function exportSize(width, height) {
+  const scale = Math.min(1920 / width, 1080 / height);
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
+export function previewSize(width, height, dpr = 1) {
+  return { width: Math.max(1, Math.round(width * dpr)), height: Math.max(1, Math.round(height * dpr)) };
 }

@@ -33,3 +33,24 @@ test('suite ids and output directories are unique', () => {
   assert.equal(new Set(ids).size, ids.length);
   assert.equal(new Set(outputs).size, outputs.length);
 });
+
+test('the paper convergence stage uses 512px, N=512 and a 300-second budget', () => {
+  const selected = createBenchmarkPlan({
+    stages: ['farlev-wallclock'], environments: DEFAULT_ENVIRONMENTS, repeats: 1, seed: 7,
+  });
+  assert.equal(selected.suites.length, 1);
+  const [suite] = selected.suites;
+  assert.equal(suite.opt_size, 512);
+  assert.deepEqual(suite.n, [512]);
+  assert.deepEqual(suite.budgets, [{ mode: 'seconds', value: 300 }]);
+  assert.deepEqual(suite.environments, DEFAULT_ENVIRONMENTS);
+});
+
+test('suite launch contains one CLI entrypoint followed by flags', async () => {
+  const { suiteArguments } = await import('../../bench/run.js');
+  const args = suiteArguments(plan.suites[0], {
+    repo: '/repo', outputRoot: '/output', sourceRevision: 'test',
+  });
+  assert.equal(args[0], 'bench/suite.js');
+  assert.ok(args.slice(1).every((arg) => arg.startsWith('--')));
+});

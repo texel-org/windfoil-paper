@@ -1,7 +1,2 @@
-# Dependencies of bench/report.py (step two of the benchmark). torch comes from
-# the pod through --system-site-packages, exactly as the engine venvs do, so it
-# is not pinned here.
+# Plotting for bench/report.py; CSV export uses Node built-ins.
 matplotlib>=3.8
-pillow>=10
-pytorch-msssim>=1.0
-lpips>=0.1.4

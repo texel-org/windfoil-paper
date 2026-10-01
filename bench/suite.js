@@ -22,6 +22,8 @@ import {
   windfoilCommand,
 } from '../tools/windfoil-runtime.js';
 
+import { exportCsv } from './csv.js';
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VENV_PYTHON = join(REPO, '.venv', 'bin', 'python');
 const PYTHON = process.env.PYTHON ?? (await exists(VENV_PYTHON) ? VENV_PYTHON : 'python3');
@@ -38,13 +40,7 @@ const DEFAULT_N = [32, 64, 128, 512, 1024, 2048, 4096, 10000, 50000];
 const DEFAULT_ENVS = ['node', 'diffvg', 'bezier'];
 const SUPPORTED_ENVS = [...WINDFOIL_ENVIRONMENTS, 'diffvg', 'bezier'];
 const WINDFOIL_VARIANTS = ['anneal', 'crisp'];
-// Crisp is the benchmarked configuration: a constant one-pixel box filter,
-// which is exact pixel-area antialiasing rather than a blur schedule the other
-// engines do not have. Anneal ends about level on final PSNR, but its early
-// blur depresses *trace* PSNR by construction, and every time-to-quality number
-// is read back from the traces -- so benchmarking it would understate
-// Windfoil's speed for no quality gain. `--windfoil-variant=anneal` still
-// selects it.
+// Benchmarks use a constant one-pixel filter; annealing is an explicit opt-in.
 const DEFAULT_WINDFOIL_VARIANTS = ['crisp'];
 const DEFAULT_CAPS = { diffvg: 4096, bezier: 4096 };
 const CLIP_MODEL = 'ViT-B-32-quickgelu';
@@ -245,6 +241,7 @@ for (const environment of environments) {
   }
 }
 
+await exportCsv(suiteRoot);
 console.log(`wrote ${relative(REPO, join(suiteRoot, 'results.jsonl'))} (${records.length} cells)`);
 const errorCount = records.filter(({ status }) => status === 'error').length;
 if (errorCount) {

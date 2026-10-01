@@ -1,71 +1,65 @@
 :root {
-  color-scheme: dark;
-  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #0d0f13;
-  color: #e6e8ef;
+  color-scheme: light;
+  font: 14px/1.5 system-ui, sans-serif;
+  background: #fff;
+  color: #222;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; padding: 24px; }
-header { text-align: center; margin-bottom: 18px; }
-h1 { margin: 0; font-size: 20px; }
-header p, .hint { color: #9298a8; }
-nav, aside {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 12px 20px;
-  margin: 14px auto;
-}
-label { color: #9298a8; }
+body { max-width: 1100px; margin: 0 auto; padding: 24px; }
+header { margin-bottom: 20px; }
+h1 { margin: 0; font-size: 20px; font-weight: 600; }
+header p { margin: 4px 0; }
+a { color: inherit; text-underline-offset: 3px; }
+header p, .hint, .caption { color: #666; }
+nav { display: grid; gap: 12px; margin: 16px 0 20px; }
+.parameters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.parameters label { display: grid; gap: 4px; }
+.parameters input, .parameters select { width: 100%; min-width: 0; }
+.actions, aside { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+aside { gap: 20px; margin: 16px 0; }
+label { display: flex; align-items: center; gap: 6px; }
 input, select, button {
   font: inherit;
   color: inherit;
-  background: #191c24;
-  border: 1px solid #303543;
-  border-radius: 6px;
-  padding: 6px 9px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 5px 8px;
+}
+select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m2 2 4 4 4-4' fill='none' stroke='%23222' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
 }
 input { width: 86px; }
+.parameters .toggle { display: flex; align-self: end; align-items: center; gap: 6px; min-height: 33px; }
+.parameters input[type="checkbox"] { width: auto; margin: 0; accent-color: #222; }
 button { cursor: pointer; }
-button:hover { border-color: #62d8c6; }
-main {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 520px));
-  justify-content: center;
-  gap: 14px;
+button:disabled { cursor: default; color: #999; }
+button:hover:not(:disabled) { background: #f5f5f5; border-color: #888; }
+input:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid #555;
+  outline-offset: 2px;
 }
-section {
-  overflow: hidden;
-  border: 1px solid #292e3a;
-  border-radius: 9px;
-  background: #151820;
-}
-.caption {
-  display: flex;
-  justify-content: space-between;
-  color: #9298a8;
-  padding: 8px 11px;
-}
-.caption b { color: #e6e8ef; }
-.canvas { aspect-ratio: 1; cursor: pointer; }
+main { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+section { min-width: 0; }
+.caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; padding: 6px 0; }
+.caption b { color: #222; font-weight: 500; }
+.canvas { border: 1px solid #000; aspect-ratio: var(--image-aspect, 16 / 9); }
+#drop { cursor: pointer; }
 canvas { display: block; width: 100%; height: 100%; }
-.bar {
-  max-width: 1054px;
-  height: 6px;
-  margin: 15px auto;
-  overflow: hidden;
-  border-radius: 4px;
-  background: #20242e;
-}
-#progress { width: 0; height: 100%; background: #62d8c6; }
-aside b { color: #62d8c6; }
-.hint { text-align: center; }
-#error { color: #ff8181; text-align: center; white-space: pre-wrap; }
+aside { font-variant-numeric: tabular-nums; }
+aside b { font-weight: 500; }
+.hint { font-size: 13px; }
+#error { color: #222; white-space: pre-wrap; }
+#error:empty { display: none; }
 #camera { position: fixed; left: -10000px; width: 2px; height: 2px; }
 
 @media (max-width: 760px) {
-  body { padding: 14px; }
+  body { padding: 16px; }
   main { grid-template-columns: 1fr; }
+  .parameters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

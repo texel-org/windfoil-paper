@@ -1,3 +1,4 @@
+import { blurParameter } from '../../js/blur.js';
 import { GenericModel } from '../../js/generic/model.js';
 import { circle, rectStroke, roundCapsule } from '../../js/generic/primitives.js';
 import { rng } from '../util/random.js';
@@ -38,6 +39,7 @@ export function buildLineModel({
   learnBlur = false,
   blurInit = 7,
   blurFloor = 1,
+  blurCeiling = null,
 }) {
   if (!LINE_PRIMITIVES[primitive]) {
     throw new Error(
@@ -84,7 +86,7 @@ export function buildLineModel({
   // no schedule coupling; the floor keeps sigma positive and bounded away
   // from a degenerate filter.
   const blur = learnBlur
-    ? new Float32Array(n).fill(Math.log(Math.max(blurInit - blurFloor, 1e-3)))
+    ? new Float32Array(n).fill(blurParameter(blurInit, blurFloor, blurCeiling))
     : null;
   const params = {
     x0, y0,
@@ -97,6 +99,7 @@ export function buildLineModel({
     params,
     style,
     blurFloor,
+    blurCeiling,
     build: (tape, p) => Array.from({ length: n }, (_, i) => {
       const w = softplus(tape, p.width[i], widthBeta);
       return {
@@ -124,7 +127,7 @@ export function buildLineModel({
 
 // CLI descriptor for the JavaScript-only stroke/point model family.
 export const lineCli = {
-  defaults: { n: 512, steps: 500, size: 128 },
+  defaults: { n: 512, steps: 500, size: 512 },
   blurFloor: 1,
   bandLimited: false,
   supportsInit: false,

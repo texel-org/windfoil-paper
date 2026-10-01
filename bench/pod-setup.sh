@@ -181,7 +181,7 @@ fi
 "$ROOT/.venv/bin/python" -c 'import open_clip, websockets, torch; assert torch.cuda.is_available()'
 
 step "report tools"
-# bench/report.py runs in the Bézier venv because it already has CUDA torch.
+# Install the plotting dependency in the Bézier venv.
 "$ROOT/.venv-bezier/bin/python" -m pip install -q -r bench/requirements.txt
 
 step "done"

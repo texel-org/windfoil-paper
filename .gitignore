@@ -14,9 +14,7 @@ __pycache__/
 *.ckpt
 *.safetensors
 *.download
-# No fixture imagery is published. The manifests are the download recipe --
-# public URLs, byte counts and SHA256 only -- and `npm run bench` cannot fetch
-# or verify a fixture on a fresh clone without them.
+# Downloaded fixtures; keep manifests tracked.
 fixtures/*
 !fixtures/README.md
 !fixtures/manifests/

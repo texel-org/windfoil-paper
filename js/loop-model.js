@@ -1,16 +1,18 @@
+import { blurSlope, blurWidth } from './blur.js';
 import { packScene } from './prep.js';
 import { anchorStyle } from './color-anchors.js';
 
 // Trainable closed quadratic loops with one color and alpha per loop.
 // style/styleParams select the color+alpha codec (default: anchor softmax).
 // An optional blur group trains each loop's filter size exactly like
-// GenericModel: sigma = blurFloor + exp(blur[i]) written to the per-shape s.
+// GenericModel; an optional ceiling bounds the per-shape filter.
 export class LoopModel {
   constructor({ ax, ay, cx, cy, colorAnchor, n, k, style = null, styleParams = null,
-    blur = null, blurFloor = 1e-3 }) {
+    blur = null, blurFloor = 1e-3, blurCeiling = null }) {
     this.style = style ?? anchorStyle();
     this.params = { ax, ay, cx, cy, ...(blur ? { blur } : {}), ...(styleParams ?? { colorAnchor }) };
     this.blurFloor = blurFloor;
+    this.blurCeiling = blurCeiling;
     // Per-model scratch lets a style reuse decode intermediates in pullback.
     this.styleScratch = this.style.createScratch?.(this.params) ?? null;
     this.n = n;
@@ -53,7 +55,7 @@ export class LoopModel {
         out.curves[o + 5] = ay[next];
       }
       out.alpha = this.style.decode(this.params, shape, shape, out.color, this.styleScratch);
-      if (this.params.blur) out.s = this.blurFloor + Math.exp(this.params.blur[shape]);
+      if (this.params.blur) out.s = blurWidth(this.params.blur[shape], this.blurFloor, this.blurCeiling);
     }
     return { shapes: this.shapes, scene: packScene(this.shapes, this.scratch) };
   }
@@ -90,7 +92,7 @@ export class LoopModel {
         );
       }
       if (blurGrads && this.params.blur) {
-        const scale = this.shapes[shape].s - this.blurFloor;
+        const scale = blurSlope(this.shapes[shape].s, this.blurFloor, this.blurCeiling);
         this.grads.blur[shape] = scale * (blurGrads[2 * shape] + blurGrads[2 * shape + 1]);
       }
     }

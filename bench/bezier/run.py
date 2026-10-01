@@ -293,11 +293,6 @@ def run(args: argparse.Namespace) -> None:
         (out / "trace.jsonl").write_text("".join(json.dumps(item) + "\n" for item in timeline))
         mse = functional.mse_loss(rendered, trainer.gt_image.float()).item()
         final_psnr = 10.0 * math.log10(1.0 / max(mse, 1e-12))
-        final_ms_ssim = None
-        if min(width, height) > 160:
-            final_ms_ssim = float(upstream.ms_ssim(
-                rendered, trainer.gt_image.float(), data_range=1, size_average=True
-            ).item())
         output_ms = (time.perf_counter() - output_started) * 1000
 
         best = max(timeline, key=lambda item: item["psnr_self"])
@@ -369,7 +364,6 @@ def run(args: argparse.Namespace) -> None:
                 "best_psnr": best["psnr_self"],
                 "best_step": best["step"],
                 "final_psnr": final_psnr,
-                "final_ms_ssim": final_ms_ssim,
             },
             "artifacts": {"final_png": "final.png", "final_svg": None, "trace": "trace.jsonl"},
         }

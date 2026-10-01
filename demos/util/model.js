@@ -3,6 +3,7 @@ import { anchorStyle } from '../../js/color-anchors.js';
 import { learnedPaletteStyle } from '../../js/learned-palette.js';
 import { rawStyle } from '../../js/raw-style.js';
 import { rng } from './random.js';
+import { blurParameter } from '../../js/blur.js';
 import { sceneToSVG } from './svg.js';
 import { parseColor, rgbToHex } from './color.js';
 import {
@@ -157,9 +158,10 @@ export function buildModel(initial) {
   // Learnable per-loop blur mirrors the stroke model: shapes start at the
   // anneal's initial width and self-anneal, floored at blurFloor.
   const blurFloor = initial.blurFloor ?? 1;
+  const blurCeiling = initial.blurCeiling ?? null;
   const blur = initial.learnBlur
     ? new Float32Array(initial.n).fill(
-        Math.log(Math.max((initial.blurInit ?? 7) - blurFloor, 1e-3)))
+        blurParameter(initial.blurInit ?? 7, blurFloor, blurCeiling))
     : null;
   const model = new LoopModel({
     ...initial.params,
@@ -169,6 +171,7 @@ export function buildModel(initial) {
     styleParams,
     blur,
     blurFloor,
+    blurCeiling,
   });
   const width = initial.width ?? initial.size;
   const height = initial.height ?? initial.size;
@@ -228,7 +231,7 @@ export function sceneSvg(_built, { shapes, width, height, pad = 0, background })
 // CLI descriptor for the default quadratic-loop shape model — the one the l2
 // and clip demos share, and the only model that accepts a shared --init.
 export const shapeCli = {
-  defaults: { n: 512, steps: 500, size: 128 },
+  defaults: { n: 512, steps: 500, size: 512 },
   blurFloor: 1,
   bandLimited: false,
   supportsInit: true,

@@ -1,41 +1,26 @@
 Windfoil reference code
 Copyright 2026 Matt DesLauriers
+Apache License 2.0 (see LICENSE).
 
-Licensed under the Apache License, Version 2.0 (see LICENSE).
+Third-party software
 
-This repository references the following third-party work; none of it is
-redistributed here.
-
-Git submodules (benchmark comparison engines, not modified here)
-----------------------------------------------------------------
-
-Bézier Splatting
-  bench/bezier/upstream, pinned to 9612a228bc0662e26e06840f2ed2b187bc366f8c
-  https://github.com/xiliu8006/Bezier_splatting
+Bézier Splatting — https://github.com/xiliu8006/Bezier_splatting
   MIT License. Copyright (c) 2024 Xinjie Zhang.
+  Submodule: bench/bezier/upstream.
 
-gsplat (the fork Bézier Splatting builds against)
-  bench/bezier/gsplat, pinned to bcca3ecae966a052e3bf8dd1ff9910cf7b8f851d
-  https://github.com/XingtongGe/gsplat
-  Apache License 2.0.
+gsplat — https://github.com/XingtongGe/gsplat
+  Apache License 2.0. Submodule: bench/bezier/gsplat.
 
-Fetched at setup time, never vendored
--------------------------------------
+DiffVG — https://github.com/BachiLi/diffvg
+  Apache License 2.0. Installed by bench/pod-setup.sh.
 
-DiffVG
-  https://github.com/BachiLi/diffvg
-  Apache License 2.0. Cloned and built by bench/pod-setup.sh; no DiffVG source
-  is included in this repository.
+CLIPAG ViT-B/32 weights — https://zenodo.org/records/10446026
+  CC BY 4.0, Roy Ganz. Downloaded when --clipag is used.
 
-CLIPAG ViT-B/32 weights (optional, `--clipag`)
-  https://zenodo.org/records/10446026
-  CC BY 4.0, Roy Ganz. Downloaded on first use by demos/clip/loss_server.py
-  into a git-ignored path; the weights are not included in this repository.
+Target images
 
-Target images (the demos' default target and the benchmark fixtures)
-  W. Carter's photograph "A dip in the road in Färlev"
-  (https://commons.wikimedia.org/wiki/File:A_dip_in_the_road_in_F%C3%A4rlev.jpg,
-  CC0 1.0) and the Kodak lossless image set (https://r0k.us/graphics/kodak/)
-  are downloaded and SHA256-verified by tools/fetch-fixtures.js from the
-  manifests in fixtures/manifests/. No imagery is redistributed here; see
-  fixtures/README.md for sources and terms.
+"A dip in the road in Färlev", W. Carter, CC0 1.0.
+  https://commons.wikimedia.org/wiki/File:A_dip_in_the_road_in_F%C3%A4rlev.jpg
+
+Kodak lossless image set — https://r0k.us/graphics/kodak/
+  See fixtures/README.md for download commands and source terms.

@@ -1,6 +1,4 @@
-// Browser optimization engine: renderer lifecycle, generation-safe resets, and
-// a single always-live step loop. The L2 page drives it with a finite step
-// budget and webcam targets.
+// Browser optimization engine with generation-safe resets and a continuous step loop.
 
 import { Renderer } from '../../js/renderer.js';
 import { OptimizationSession } from '../../js/optimize.js';
@@ -8,9 +6,22 @@ import { buildModel, createInit } from './model.js';
 import { buildLineModel } from '../lines/model.js';
 
 // Dispatch the shape / line model builders behind one signature.
-export function buildFitModel({ mode, n, size, seed, target = null, background = [1, 1, 1] }) {
-  if (mode === 'line') return buildLineModel({ n, size, seed, target });
-  return buildModel(createInit({ n, size, k: 8, seed, target, background }));
+export function buildFitModel({
+  mode, n, size = null, width = size, height = size, seed, target = null,
+  background = [1, 1, 1], colorCount = 1, opaque = false, learnBlur = false, lrScale = 1,
+}) {
+  const colorOptions = { colorCount, opaque, learnBlur, blurInit: 7, blurFloor: 1, blurCeiling: 32,
+    ...(opaque && colorCount === 1 ? { raw: { channels: 'rgb', transfer: 'sigmoid', alpha: 1 } } : {}),
+  };
+  const built = mode !== 'shape'
+    ? buildLineModel({ n, width, height, seed, target, primitive: mode, ...colorOptions })
+    : buildModel({ ...createInit({ n, width, height, k: 8, seed, target, background }), ...colorOptions, seed });
+  if (lrScale !== 1) {
+    built.lrs = Object.fromEntries(Object.entries(built.lrs).map(([key, rate]) => [
+      key, { ...rate, lr: rate.lr * lrScale },
+    ]));
+  }
+  return built;
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -20,9 +31,11 @@ export class Engine {
   // settings: (step) => renderer settings ({ s, scale, origin, bg })
   // onFrame:  called after every accepted step and reset so the page can repaint
   // onError:  surfaces a fatal step error
-  constructor(device, { size, build, settings, onFrame = null, onError = null }) {
+  constructor(device, { size = null, width = size, height = size, blend = 'src-over', build, settings, onFrame = null, onError = null }) {
     this.device = device;
-    this.size = size;
+    this.width = width;
+    this.height = height;
+    this.blend = blend;
     this.build = build;
     this.settings = settings;
     this.onFrame = onFrame;
@@ -42,8 +55,6 @@ export class Engine {
     this.shapes = null;
 
     this.playing = false;
-    this.continuous = true; // when false the loop pauses once step >= steps
-    this.steps = Infinity;
     this.generation = 0;
     this.activeStep = null;
   }
@@ -56,7 +67,10 @@ export class Engine {
   // Push a new target into the running session without rebuilding it.
   updateTarget(target, background = null) {
     this.setTarget(target, background);
-    this.session?.setTarget(target);
+    // A camera can deliver frames while a resized renderer is being built.
+    if (this.session?.renderer.width === this.width && this.session.renderer.height === this.height) {
+      this.session.setTarget(target);
+    }
   }
 
   // Rebuild the model (fresh) or just the session (fresh=false), growing the
@@ -83,16 +97,22 @@ export class Engine {
     let nextRenderer = this.renderer;
     let nextCapacity = this.capacity;
     let createdRenderer = false;
-    if (fresh || !nextModel) {
+    const resized = nextRenderer && (nextRenderer.width !== this.width || nextRenderer.height !== this.height);
+    const blendChanged = nextRenderer && nextRenderer.blend !== this.blend;
+    if (fresh || !nextModel || resized || blendChanged) {
       ({ model: nextModel, lrs: nextRates } = this.build());
-      const grow = !nextRenderer ||
+      const alphaChanged = nextRenderer && nextRenderer.train?.alpha !== nextModel.style.trainsAlpha;
+      const blurChanged = nextRenderer && !!nextRenderer.train?.blur !== !!nextModel.params.blur;
+      const grow = !nextRenderer || resized || blendChanged || alphaChanged || blurChanged ||
         nextModel.maxShapes > this.capacity.shapes ||
         nextModel.maxPieces > this.capacity.pieces ||
         nextModel.maxCurves > this.capacity.curves;
       if (grow) {
         nextRenderer = await Renderer.create(this.device, {
-          width: this.size,
-          height: this.size,
+          width: this.width,
+          height: this.height,
+          blend: this.blend,
+          train: { alpha: nextModel.style.trainsAlpha, blur: !!nextModel.params.blur },
           maxShapes: nextModel.maxShapes,
           maxPieces: nextModel.maxPieces,
           maxCurves: nextModel.maxCurves,
@@ -132,6 +152,19 @@ export class Engine {
     this.onFrame?.(this);
   }
 
+  snapshot(includeShapes = false) {
+    if (!this.model || !this.target) return null;
+    const decoded = this.model.decode();
+    return {
+      scene: structuredClone(decoded.scene),
+      ...(includeShapes ? { shapes: structuredClone(decoded.shapes) } : {}),
+      width: this.width, height: this.height, blend: this.blend, learnBlur: !!this.model.params.blur,
+      background: [...this.background],
+      maxShapes: this.model.maxShapes, maxPieces: this.model.maxPieces,
+      maxCurves: this.model.maxCurves,
+    };
+  }
+
   #retireRenderer(value) {
     const pending = this.activeStep;
     if (pending) pending.then(() => value.destroy(), () => value.destroy());
@@ -141,7 +174,7 @@ export class Engine {
   // Single owner of the optimization cadence; start once after construction.
   async run() {
     for (;;) {
-      if (!this.playing || !this.session || (!this.continuous && this.step >= this.steps)) {
+      if (!this.playing || !this.session) {
         await sleep(20);
         continue;
       }
@@ -158,7 +191,6 @@ export class Engine {
         this.step++;
         const elapsed = performance.now() - started;
         this.averageMs = this.averageMs ? this.averageMs * 0.85 + elapsed * 0.15 : elapsed;
-        if (!this.continuous && this.step >= this.steps) this.playing = false;
         this.onFrame?.(this);
       } catch (error) {
         if (active !== this.session || ticket !== this.generation) continue;

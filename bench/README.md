@@ -26,11 +26,11 @@ Both should print `PASS`. Windfoil's `env.json` must name the GPU, not `llvmpipe
 ## Run
 
 ```sh
-npm run bench -- --skip=clip --out=output/my-run
+npm run bench -- --only=opt512,big-image,large-n,kodak,full-schedule,farlev-wallclock --seed=1 --out=output/my-run
 ```
 
-Use `tmux` for long runs; reuse `--out` to resume. For CLIP, start
-`npm run clip:server` separately and omit `--skip=clip`.
+Use `tmux` for long runs; reuse `--out` to resume. To run the optional CLIP
+stage, start `npm run clip:server` separately and select `--only=clip`.
 `--help` lists options; `--dry-run` prints the matrix.
 Windfoil alone needs only the [root setup](../README.md#quick-start):
 
@@ -44,4 +44,12 @@ npm run bench -- --only=opt512 --env=node
 .venv-bezier/bin/python bench/report.py output/my-run
 ```
 
-Reports go under the run's `report/`. Give different protocols separate run directories.
+Benchmarks write `cells.csv` and `traces.csv`. The report reads these and writes
+`summary.csv` (table values, corpus means, median parity and coverage),
+`comparison.csv` (per-cell comparisons), and `convergence-farlev-wallclock.svg`
+and `.pdf` for the 300-second stage. No perceptual metrics or other plots.
+
+To export CSVs from an older run: `node bench/csv.js output/my-run`.
+Reports accept multiple run directories to combine separately recorded stages;
+`--out=PATH` sets the destination. Install `bench/requirements.txt` for plotting.
+`python3 -m unittest discover -s bench -p 'test_*.py'` checks table calculations.

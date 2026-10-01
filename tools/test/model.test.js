@@ -346,7 +346,7 @@ test('plot point model stipples fixed-radius discs in one default pen', () => {
 });
 
 test('model descriptors expose a consistent CLI contract', () => {
-  assert.deepEqual(shapeCli.defaults, { n: 512, steps: 500, size: 128 });
+  assert.deepEqual(shapeCli.defaults, { n: 512, steps: 500, size: 512 });
   assert.equal(shapeCli.primitive(null), 'quadratic-loop');
   assert.equal(shapeCli.supportsInit, true);
   assert.equal(shapeCli.blurFloor, 1);
@@ -363,7 +363,7 @@ test('model descriptors expose a consistent CLI contract', () => {
   });
   assert.equal(lineCli.parse({ 'learn-blur': true }).learnBlur, true);
 
-  assert.deepEqual(plotCli.defaults, { n: 4000, steps: 800, size: 256 });
+  assert.deepEqual(plotCli.defaults, { n: 4000, steps: 800, size: 512 });
   assert.equal(plotCli.blurFloor, 2);
   assert.equal(plotCli.bandLimited, true);
   assert.equal(plotCli.supportsInit, false);

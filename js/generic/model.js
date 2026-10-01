@@ -1,3 +1,4 @@
+import { blurSlope, blurWidth } from '../blur.js';
 import { packScene } from '../prep.js';
 import { anchorStyle } from '../color-anchors.js';
 import { Tape } from './autodiff.js';
@@ -5,16 +6,14 @@ import { Tape } from './autodiff.js';
 // Fixed-topology geometry described as ordinary scalar tape expressions.
 // style selects the color+alpha codec (default: anchor softmax).
 //
-// An optional params.blur group (one value per shape) trains each shape's
-// filter size: sigma = blurFloor + exp(blur[i]), written to the shape's
-// per-shape `s`, which overrides the global (annealed) filter in the
-// renderer. Initialize blur at the anneal start and shapes learn their own
-// coarse-to-fine schedule; the exp keeps sigma above the floor.
+// Optional params.blur trains native per-shape filter sizes, with a floor
+// and optional ceiling. These override the global filter.
 export class GenericModel {
-  constructor({ params, build, style = null, blurFloor = 1e-3 }) {
+  constructor({ params, build, style = null, blurFloor = 1e-3, blurCeiling = null }) {
     this.style = style ?? anchorStyle();
     this.params = params;
     this.blurFloor = blurFloor;
+    this.blurCeiling = blurCeiling;
     // Per-model scratch lets a style reuse decode intermediates in pullback.
     this.styleScratch = this.style.createScratch?.(params) ?? null;
     this.scratch = {};
@@ -62,7 +61,7 @@ export class GenericModel {
       out.alpha = this.style.decode(
         this.params, style.color, style.alpha, out.color, this.styleScratch,
       );
-      if (blur) out.s = this.blurFloor + Math.exp(blur[shape]);
+      if (blur) out.s = blurWidth(blur[shape], this.blurFloor, this.blurCeiling);
     }
     return { shapes: this.shapes, scene: packScene(this.shapes, this.scratch) };
   }
@@ -102,9 +101,9 @@ export class GenericModel {
     }
     if (blurGrads && this.params.blur) {
       // Isotropic sigma feeds both filter axes, so dL/dsigma = dsx + dsy;
-      // chain through sigma = floor + exp(u) via the decoded value.
+      // Chain through the filter parameterization via the decoded width.
       for (let shape = 0; shape < this.n; shape++) {
-        const scale = this.shapes[shape].s - this.blurFloor;
+        const scale = blurSlope(this.shapes[shape].s, this.blurFloor, this.blurCeiling);
         this.grads.blur[shape] = scale * (blurGrads[2 * shape] + blurGrads[2 * shape + 1]);
       }
     }

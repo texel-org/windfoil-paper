@@ -12,7 +12,7 @@ import { buildRoundtripModel } from './model.js';
 
 export const ROUNDTRIP_DEFAULTS = Object.freeze({
   svg: 'demos/roundtrip/star-evenodd.svg',
-  optSize: 128,
+  optSize: 512,
   steps: 100,
   blur: 7,
   offset: null,

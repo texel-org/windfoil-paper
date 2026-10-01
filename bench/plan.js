@@ -10,7 +10,7 @@ export const DEFAULT_STAGES = [
   'clip',
   'kodak',
 ];
-export const OPTIONAL_STAGES = ['kodak-long', 'full-schedule', 'probes'];
+export const OPTIONAL_STAGES = ['kodak-long', 'full-schedule', 'farlev-wallclock', 'probes'];
 export const ALL_STAGES = [...DEFAULT_STAGES, ...OPTIONAL_STAGES];
 
 const FARLEV = {
@@ -19,28 +19,10 @@ const FARLEV = {
   path: 'fixtures/wikimedia/farlev-dip-in-road.jpg',
   fixture: 'farlev-highres',
 };
-// The whole Kodak set, so the corpus a reviewer runs is the corpus the quality
-// claim is computed over. All 24 images and not a subset: the Windfoil-DiffVG
-// difference is small next to its spread between images, so a subset can change
-// its sign. Sampling the corpus would not shorten the run so much as invalidate
-// it.
 const KODAK_ALL = Array.from({ length: 24 }, (_, index) => index + 1);
-// One shape count, because this stage answers "how good, over a standard
-// corpus" and `opt512` already answers "how does that change with N". More
-// shape counts here would multiply the longest stage in the sweep to restate,
-// more weakly, a result opt512 already carries.
 const KODAK_N = [512];
-// full-schedule stays on four images: it runs Bézier's published 10,000-step
-// protocol, and 24 images at that budget is hours per cell for no extra claim.
 const KODAK_SUBSET = [4, 9, 13, 23];
-// `kodak-long` defaults. 10,000 steps because that is the budget every engine's
-// schedule is actually written for: Bezier's prune/densify window is a
-// hard-coded `1000 <= iteration < 9200` and its LR ladder steps at 5000/6000/
-// 9000, neither of which is rescaled by the requested iteration count, so any
-// budget below 1000 runs the method with pruning, densification and annealing
-// all silently disabled. DiffVG is the one engine still gaining at 800 steps
-// only in the sense that it has nearly stopped; 10k lets it finish rather than
-// leaving the reader to wonder.
+// Bézier's pruning/densification window and LR schedule require the full budget.
 const KODAK_LONG_IMAGES = [5];
 const KODAK_LONG_STEPS = 10000;
 const CLIP_PROMPT = 'a photo of a lighthouse on a cliff at dusk';
@@ -83,12 +65,7 @@ export function createBenchmarkPlan({
     }
   }
 
-  // The same 4K target under two protocols, as two suites rather than two
-  // budgets of one: the report treats cells that share a suite and a shape count
-  // as repeats of one another and averages them. The wall-clock suite asks what
-  // each engine reaches in equal time, where they complete very different
-  // numbers of steps; the 800-step suite is the equal-step protocol every other
-  // L2 stage reports, and DiffVG's cell is what makes it the costlier of the two.
+  // Separate suites keep fixed-step and fixed-time protocols separate.
   if (selected.has('big-image')) {
     suites.push(suite({
       id: 'big-image/farlev-4096-60s',
@@ -182,9 +159,6 @@ export function createBenchmarkPlan({
         optSize: 'max',
         environments,
         n: KODAK_N,
-        // A wall-clock budget is the honest axis for a speed claim, and it also
-        // feeds the step figure: a trace row carries both its step and its
-        // elapsed time, so one run answers "per second" and "per step" alike.
         ...(longSeconds ? { seconds: [longSeconds] } : { steps: [longSteps] }),
       }));
     }
@@ -217,6 +191,14 @@ export function createBenchmarkPlan({
         steps: [10000],
       }));
     }
+  }
+
+  if (selected.has('farlev-wallclock')) {
+    suites.push(suite({
+      id: 'farlev-wallclock/farlev-300s', stage: 'farlev-wallclock',
+      target: FARLEV, protocol: 'convergence-wallclock', optSize: 512,
+      environments, variants: ['crisp'], n: [512], seconds: [300],
+    }));
   }
 
   if (selected.has('probes')) {

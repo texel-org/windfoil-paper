@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 // The benchmark entry point: one resumable command that plans every suite,
 // fetches and verifies its fixtures, runs the matrix through bench/suite.js,
-// and records the machine it ran on. It writes raw artifacts only -- tables,
-// figures and perceptual metrics come from `bench/report.py`, a separate step
-// so a long sweep never depends on torch or matplotlib being installed.
+// and records the machine and CSV data. report.py produces the table and plot.
 
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -27,6 +25,8 @@ import {
   expandStageSelectors,
 } from './plan.js';
 
+import { exportCsv } from './csv.js';
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE_INPUTS = [
   'package.json',
@@ -41,6 +41,7 @@ const SOURCE_INPUTS = [
   'bench/run.js',
   'bench/plan.js',
   'bench/suite.js',
+  'bench/csv.js',
   'bench/optimizer_state.py',
   'bench/diffvg/run.py',
   'bench/diffvg/requirements.txt',
@@ -382,6 +383,7 @@ export async function runBench(argv = process.argv.slice(2), dependencies = {}) 
       entry.error = result.error?.message ?? `benchmark runner exited with ${result.code}`;
       failures.push(suite.id);
     }
+    await exportCsv(outputRoot);
     state.updated_at = entry.completed_at;
     await writeJsonAtomic(statePath, state);
   }
@@ -492,14 +494,7 @@ export function environment(repo = REPO, options = null, date = new Date().toISO
   };
 }
 
-// The report needs matplotlib and torch, which live in a venv rather than the
-// system Python. Name an interpreter that can actually run it, so the printed
-// command can be pasted: a bare `python3` is usually wrong on a pod, and a
-// relative `.venv/bin/python` is wrong from anywhere but the repo root.
-// Existence is not enough -- pod-setup.sh puts the report dependencies in
-// `.venv-bezier` (it already has CUDA torch) while `.venv` holds the CLIP
-// server, so picking the first venv that exists names one that cannot import
-// matplotlib. Probe instead of guessing at the layout.
+// Pick an interpreter with the report dependency installed.
 function reportPython(repo) {
   if (process.env.REPORT_PYTHON) return process.env.REPORT_PYTHON;
   const candidates = [

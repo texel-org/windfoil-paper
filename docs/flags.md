@@ -16,7 +16,7 @@ comma-separated lists or repeated flags; every combination runs separately.
 | `--prompt=TEXT` | `a hot air balloon festival` | CLIP prompt. |
 | `--n=N` | 512 (`plot`: 4000) | Number of primitives. |
 | `--k=N` | 8 | Quadratic curves per loop (shape model only). |
-| `--opt-size=N\|max` | 128 (`plot`: 256) | Longest side of the optimization canvas. `max` is the source size for L2 and 224 for CLIP. |
+| `--opt-size=N\|max` | 512 | Longest side of the optimization canvas. `max` is the source size for L2 and 224 for CLIP. |
 | `--steps=N` | 500 (`plot`: 800) | Step budget. |
 | `--seconds=S` | — | Wall-clock budget instead of a step budget. |
 | `--max-steps=N` | 1000000 | Step cap for a `--seconds` run. |
@@ -109,7 +109,7 @@ SVG inputs support solid fills, an optional background rect, and closed
 `M/L/H/V/Q/Z` paths with either fill rule. Strokes, transforms, CSS, filters,
 and references are rejected. Large raster outputs are limited by host memory.
 
-`demo:roundtrip`: `--svg=PATH`, `--opt-size=N`, `--steps=N`,
+`demo:roundtrip`: `--svg=PATH`, `--opt-size=N` (default 512), `--steps=N`,
 `--offset=x,y` (initial translation in SVG units), `--save-every=N`, `--out=PATH`.
 
 ## Runtime and checks
