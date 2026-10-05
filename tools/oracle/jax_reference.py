@@ -48,6 +48,7 @@ def render(curves_value, colors_value, alphas_value, filters_value=None):
         fill_rules=source.get("fillRules"),
         blend=source.get("blend", "src-over"),
         shape_s=filters_value,
+        kernel=settings.get("kernel", "box"),
     )
 
 

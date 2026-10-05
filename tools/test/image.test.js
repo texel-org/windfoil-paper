@@ -168,6 +168,25 @@ test('blurred target provider buckets and caches filter sizes', () => {
   assert.equal(provider(2.99), coarse);
   assert.notEqual(coarse, rgba);
   assert.notEqual(provider(3.6), coarse);
+  assert.throws(() => blurredTargetProvider(rgba, 4, 1, 0.5, 'gauss'), /unknown filter kernel/);
+});
+
+test('blurred targets match each kernel convolution order', () => {
+  const impulse = new Float32Array(9 * 4);
+  impulse[4 * 4] = 1;
+  const red = (kernel) => Array.from(
+    blurredTargetProvider(impulse, 9, 1, 0.5, kernel)(2)
+      .filter((_, index) => index % 4 === 0),
+  );
+  const box = red('box');
+  const tent = red('tent');
+  const cubic = red('cubic');
+  assert.deepEqual(box, [0, 0, 0, 0.25, 0.5, 0.25, 0, 0, 0]);
+  assert.notDeepEqual(tent, box);
+  assert.notDeepEqual(cubic, tent);
+  for (const values of [box, tent, cubic]) {
+    assert.ok(Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) < 1e-7);
+  }
 });
 
 test('image source loads JPEG by magic bytes', { skip: jpegAvailable ? false : 'run npm install' }, async () => {

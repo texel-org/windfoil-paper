@@ -400,31 +400,81 @@ fn backward(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(workgroup_i
       // so blur gradients match JAX by construction.
       var sxAdj = 0.0;
       var syAdj = 0.0;
-      for (var p = 0u; p < count; p++) {
-        let o = 6u * (start + p);
-        // Mirror forward's strict y-band cull.
-        let q1y = pieces[o + 1] - cy;
-        let q3y = pieces[o + 5] - cy;
-        if (max(q1y, q3y) < -hy || min(q1y, q3y) > hy) { continue; }
-        let q1x = pieces[o] - cx;
-        let q2x = pieces[o + 2] - cx;
-        let q3x = pieces[o + 4] - cx;
-        if (max(q1x, max(q2x, q3x)) < -hx) { continue; }
-        let q1 = vec2<f32>(q1x, q1y);
-        let q2 = vec2<f32>(q2x, pieces[o + 3] - cy);
-        let q3 = vec2<f32>(q3x, q3y);
-        let g = integrate_piece_grad(q1, q2, q3, -hy, hy, hx, dA);
-        if (TRAIN_GEOMETRY) {
-          add_piece_grad(o, g.dq1.x);
-          add_piece_grad(o + 1u, g.dq1.y);
-          add_piece_grad(o + 2u, g.dq2.x);
-          add_piece_grad(o + 3u, g.dq2.y);
-          add_piece_grad(o + 4u, g.dq3.x);
-          add_piece_grad(o + 5u, g.dq3.y);
+      if (FILTER_KERNEL == KERNEL_BOX) {
+        for (var p = 0u; p < count; p++) {
+          let o = 6u * (start + p);
+          // Mirror forward's strict y-band cull.
+          let q1y = pieces[o + 1] - cy;
+          let q3y = pieces[o + 5] - cy;
+          if (max(q1y, q3y) < -hy || min(q1y, q3y) > hy) { continue; }
+          let q1x = pieces[o] - cx;
+          let q2x = pieces[o + 2] - cx;
+          let q3x = pieces[o + 4] - cx;
+          if (max(q1x, max(q2x, q3x)) < -hx) { continue; }
+          let q1 = vec2<f32>(q1x, q1y);
+          let q2 = vec2<f32>(q2x, pieces[o + 3] - cy);
+          let q3 = vec2<f32>(q3x, q3y);
+          let g = integrate_piece_grad(q1, q2, q3, -hy, hy, hx, dA);
+          if (TRAIN_GEOMETRY) {
+            add_piece_grad(o, g.dq1.x);
+            add_piece_grad(o + 1u, g.dq1.y);
+            add_piece_grad(o + 2u, g.dq2.x);
+            add_piece_grad(o + 3u, g.dq2.y);
+            add_piece_grad(o + 4u, g.dq3.x);
+            add_piece_grad(o + 5u, g.dq3.y);
+          }
+          if (TRAIN_BLUR) {
+            sxAdj += q1.x * g.dq1.x + q2.x * g.dq2.x + q3.x * g.dq3.x;
+            syAdj += q1.y * g.dq1.y + q2.y * g.dq2.y + q3.y * g.dq3.y;
+          }
         }
-        if (TRAIN_BLUR) {
-          sxAdj += q1.x * g.dq1.x + q2.x * g.dq2.x + q3.x * g.dq3.x;
-          syAdj += q1.y * g.dq1.y + q2.y * g.dq2.y + q3.y * g.dq3.y;
+      } else {
+        // Sum all taps per piece before the fixed-point adds.
+        let taps = kernel_tap_count();
+        for (var p = 0u; p < count; p++) {
+          let o = 6u * (start + p);
+          let p1 = vec2<f32>(pieces[o], pieces[o + 1u]);
+          let p2 = vec2<f32>(pieces[o + 2u], pieces[o + 3u]);
+          let p3 = vec2<f32>(pieces[o + 4u], pieces[o + 5u]);
+          var dq1 = vec2<f32>(0.0);
+          var dq2 = vec2<f32>(0.0);
+          var dq3 = vec2<f32>(0.0);
+          for (var j = 0u; j < taps; j++) {
+            let ty = kernel_tap(j);
+            let tcy = cy + ty.x * sf.y;
+            let q1y = p1.y - tcy;
+            let q3y = p3.y - tcy;
+            if (max(q1y, q3y) < -hy || min(q1y, q3y) > hy) { continue; }
+            let dAy = dA * ty.y;
+            for (var i = 0u; i < taps; i++) {
+              let tx = kernel_tap(i);
+              let tcx = cx + tx.x * sf.x;
+              let q1x = p1.x - tcx;
+              let q2x = p2.x - tcx;
+              let q3x = p3.x - tcx;
+              if (max(q1x, max(q2x, q3x)) < -hx) { continue; }
+              let q1 = vec2<f32>(q1x, q1y);
+              let q2 = vec2<f32>(q2x, p2.y - tcy);
+              let q3 = vec2<f32>(q3x, q3y);
+              let g = integrate_piece_grad(q1, q2, q3, -hy, hy, hx, dAy * tx.y);
+              dq1 += g.dq1;
+              dq2 += g.dq2;
+              dq3 += g.dq3;
+            }
+          }
+          if (TRAIN_GEOMETRY) {
+            add_piece_grad(o, dq1.x);
+            add_piece_grad(o + 1u, dq1.y);
+            add_piece_grad(o + 2u, dq2.x);
+            add_piece_grad(o + 3u, dq2.y);
+            add_piece_grad(o + 4u, dq3.x);
+            add_piece_grad(o + 5u, dq3.y);
+          }
+          if (TRAIN_BLUR) {
+            // Taps scale with s, so Euler's identity uses the untapped p - c.
+            sxAdj += (p1.x - cx) * dq1.x + (p2.x - cx) * dq2.x + (p3.x - cx) * dq3.x;
+            syAdj += (p1.y - cy) * dq1.y + (p2.y - cy) * dq2.y + (p3.y - cy) * dq3.y;
+          }
         }
       }
       if (TRAIN_BLUR) {

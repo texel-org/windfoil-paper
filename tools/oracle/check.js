@@ -149,6 +149,24 @@ function blurCase() {
   };
 }
 
+function kernelCase(kernel, s) {
+  const base = nonzeroCase();
+  return {
+    ...base,
+    name: kernel,
+    settings: { ...base.settings, s, kernel },
+  };
+}
+
+function kernelBlurCase(kernel) {
+  const base = blurCase();
+  return {
+    ...base,
+    name: `blur-${kernel}`,
+    settings: { ...base.settings, kernel },
+  };
+}
+
 // HDR linear light through a tonemap operator: the host chains the
 // display-space cotangent back to linear (tonemapChain) exactly as the
 // CLIP path does; JAX differentiates the tonemapped render directly,
@@ -333,6 +351,10 @@ async function main() {
       blendCase('multiply', [0.93, 0.89, 0.84]),
       blendCase('screen', [0.07, 0.11, 0.16]),
       blurCase(),
+      kernelCase('tent', [7.5, 6.5]),
+      kernelCase('cubic', [5.5, 4.5]),
+      kernelBlurCase('tent'),
+      kernelBlurCase('cubic'),
       tonemapCase(),
       tonemapCase('reinhard-white', { white: 2.3 }),
       tonemapCase('smooth', { white: 2.3 }),
@@ -364,7 +386,7 @@ async function main() {
         compare('wgrad', [gpu.wGrad], [reference.wGrad], { relL2: 1e-3 });
       }
     }
-    console.log('fill-rule and blend-mode oracle parity ok');
+    console.log('fill-rule, blend-mode, and filter-kernel oracle parity ok');
   } catch (error) {
     if (temporary) console.error(`oracle files kept at ${workDir}`);
     throw error;

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "lato",
+  "destination": "fixtures/lato",
+  "source": "https://github.com/ruby/rdoc/tree/7d97d2b7531d366c9f83b097945399f68c3e5e55/lib/rdoc/generator/template/darkfish/fonts",
+  "license": "SIL Open Font License 1.1; Lato 1.105 by Lukasz Dziedzic (tyPoland), the cut ruby/rdoc ships. OFL.txt is the Google Fonts copy for Lato 1.x.",
+  "files": [
+    {
+      "path": "Lato-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/ruby/rdoc/7d97d2b7531d366c9f83b097945399f68c3e5e55/lib/rdoc/generator/template/darkfish/fonts/Lato-Regular.ttf",
+      "bytes": 96184,
+      "sha256": "e204e9ca2b6622d68dfefe0127c22dc22f2624a6b77416c2de8afb5ef5e71374"
+    },
+    {
+      "path": "OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/90abd17b4f97671435798b6147b698aa9087612f/ofl/lato/OFL.txt",
+      "bytes": 4407,
+      "sha256": "74ba064d03f1f1c4a952da936c3eb71866c34404916734de3cae73b34357e59e"
+    }
+  ]
+}

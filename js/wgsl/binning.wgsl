@@ -16,9 +16,10 @@ fn axis_tiles(lo : f32, hi : f32, org : f32, dim : u32) -> vec3<u32> {
 struct TileRange { hit : bool, tx0 : u32, ty0 : u32, tx1 : u32, ty1 : u32 };
 fn shape_tile_range(si : u32) -> TileRange {
   let sf = shape_filter(si);
+  let r = kernel_radius();
   let b = shapes[si].bbox;
-  let ax = axis_tiles(b.x - 0.5 * sf.x, b.z + 0.5 * sf.x, U.origin.x, U.size.x);
-  let ay = axis_tiles(b.y - 0.5 * sf.y, b.w + 0.5 * sf.y, U.origin.y, U.size.y);
+  let ax = axis_tiles(b.x - r * sf.x, b.z + r * sf.x, U.origin.x, U.size.x);
+  let ay = axis_tiles(b.y - r * sf.y, b.w + r * sf.y, U.origin.y, U.size.y);
   return TileRange(ax.x == 1u && ay.x == 1u, ax.y, ay.y, ax.z, ay.z);
 }
 

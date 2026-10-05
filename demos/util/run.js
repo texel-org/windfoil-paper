@@ -11,6 +11,7 @@ import {
   padImage,
 } from "./image.js";
 import { optimize } from "../../js/optimize.js";
+import { resolveKernel } from "../../js/filter-kernels.js";
 import { TONEMAP_HAS_WHITE, tonemapImage } from "../../js/tonemap.js";
 import { withBackgroundColor } from "../../js/background-model.js";
 import {
@@ -195,14 +196,15 @@ export async function runCase({
       annealedBlur(step, scheduleSteps, config.blurStart, config.blur);
     const settings = (step) => {
       const s = blurAt(step);
-      return { s: [s, s], bg: background };
+      return { s: [s, s], bg: background, kernel: config.kernel };
     };
     // Band-limited tone matching (plot): the render is compared against a target
     // box-filtered like the renderer's current filter, so mark density can
     // express gray levels instead of chasing crisp pixels.
     let stepTarget = target?.rgba ?? null;
     if (modelCli.bandLimited && target) {
-      const blurred = blurredTargetProvider(target.rgba, optWidth, optHeight);
+      const blurred = blurredTargetProvider(
+        target.rgba, optWidth, optHeight, 0.5, config.kernel);
       stepTarget = (step) => blurred(blurAt(step));
     }
     if (config.saveEvery) {
@@ -366,6 +368,7 @@ export async function runCase({
       pad: config.pad || undefined,
       seed: config.seed,
       blend: config.blend === "src-over" ? undefined : config.blend,
+      kernel: config.kernel === "box" ? undefined : config.kernel,
       blur: config.blur,
       blurStart: config.blurStart,
       // --learn-blur trains a per-shape filter size instead of following the
@@ -505,6 +508,7 @@ export function saveFrameSettings({
       pad + (height - saveHeight * scale) * 0.5,
     ],
     s: blur ? current.s : [scale, scale],
+    kernel: blur ? (current.kernel ?? "box") : "box",
     bg: background,
   };
 }
@@ -569,6 +573,8 @@ function expandCases(lossKind, options, modelKind) {
     white: "white" in options ? positiveArg(options, "white") : 1,
     whiteLr: "white-lr" in options ? positiveArg(options, "white-lr") : 0.05,
     ...parseBlurOptions(options),
+    // --kernel: box, tent, or cubic; final outputs stay on box.
+    kernel: kernelArg(options, "kernel", "box"),
     // --lr-scale multiplies every parameter group's learning rate. The
     // models' defaults are tuned against src-over; order-independent blends
     // deliver unattenuated gradients whose effective step grows with overlap
@@ -808,6 +814,12 @@ function makeResult({
       frames: config.saveEvery ? "frames/" : null,
     },
   };
+}
+
+function kernelArg(options, key, fallback) {
+  const value = String(arg(options, key, fallback));
+  resolveKernel(value); // throws with the accepted kernel names
+  return value;
 }
 
 function numbers(values, key) {

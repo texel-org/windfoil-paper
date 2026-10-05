@@ -10,6 +10,17 @@ import {
   sortCapacity,
   sortCapacityFor,
 } from '../../js/renderer.js';
+import {
+  CUBIC_CENTER,
+  CUBIC_INNER,
+  CUBIC_MID,
+  CUBIC_OUTER,
+  GL3_CENTER,
+  GL3_EDGE,
+  GL3_NODE,
+  KERNELS,
+  resolveKernel,
+} from '../../js/filter-kernels.js';
 
 function shapeData(shapes) {
   const out = new Float32Array(shapes.length * 16);
@@ -41,6 +52,82 @@ test('per-shape filters override the global filter', () => {
     { bbox: [8, 8, 8, 8], s: [40, 40] },
   ]);
   assert.equal(countTileEntries(shapes, settings), 1 + 4);
+});
+
+test('the kernel radius expands the binned footprint', () => {
+  const wide = { width: 64, height: 64, s: [28, 28], scale: 1, origin: [0, 0] };
+  const shapes = shapeData([{ bbox: [8, 8, 8, 8] }]);
+  assert.equal(countTileEntries(shapes, wide), 4);
+  assert.equal(countTileEntries(shapes, { ...wide, kernel: 'box' }), 4);
+  // Conservatively bin to the tent target profile's 2s support.
+  assert.equal(countTileEntries(shapes, { ...wide, kernel: 'tent' }), 9);
+  // Conservatively bin to the cubic target profile's 4s support.
+  assert.equal(countTileEntries(shapes, { ...wide, kernel: 'cubic' }), 16);
+  assert.throws(
+    () => countTileEntries(shapes, { ...wide, kernel: 'gauss' }),
+    /unknown filter kernel/,
+  );
+});
+
+test('the WGSL kernel constants match the JS registry', async () => {
+  const source = await readFile(new URL('../../js/wgsl/coverage.wgsl', import.meta.url), 'utf8');
+  assert.ok(source.includes(`const GL3_NODE : f32 = ${GL3_NODE};`));
+  assert.ok(source.includes(`const GL3_EDGE : f32 = ${GL3_EDGE};`));
+  assert.ok(source.includes(`const GL3_CENTER : f32 = ${GL3_CENTER};`));
+  assert.ok(source.includes(`const CUBIC_OUTER : f32 = ${CUBIC_OUTER};`));
+  assert.ok(source.includes(`const CUBIC_MID : f32 = ${CUBIC_MID};`));
+  assert.ok(source.includes(`const CUBIC_INNER : f32 = ${CUBIC_INNER};`));
+  assert.ok(source.includes(`const CUBIC_CENTER : f32 = ${CUBIC_CENTER};`));
+  assert.equal(KERNELS.box.code, 0);
+  assert.equal(KERNELS.tent.code, 1);
+  assert.equal(KERNELS.cubic.code, 2);
+  assert.match(source, /fn kernel_radius\(\)[\s\S]*KERNEL_CUBIC\) \{ return 2\.0; \}/);
+  assert.equal(resolveKernel('box').radius, 0.5);
+  assert.equal(resolveKernel('tent').radius, 1);
+  assert.equal(resolveKernel('cubic').radius, 2);
+  assert.equal(resolveKernel('cubic').boxPasses, 4);
+  assert.equal(resolveKernel('cubic').taps.length, 7);
+  assert.equal(resolveKernel().code, 0);
+  assert.throws(() => resolveKernel('toString'), /unknown filter kernel/);
+  assert.throws(() => resolveKernel('__proto__'), /unknown filter kernel/);
+  assert.match(source, /KERNEL_CUBIC\) \{ return 7u; \}/);
+  for (const line of [
+    'i == 0u) { return vec2<f32>(-3.0 * GL3_NODE, CUBIC_OUTER);',
+    'i == 1u) { return vec2<f32>(-2.0 * GL3_NODE, CUBIC_MID);',
+    'i == 2u) { return vec2<f32>(-GL3_NODE, CUBIC_INNER);',
+    'i == 3u) { return vec2<f32>(0.0, CUBIC_CENTER);',
+    'i == 4u) { return vec2<f32>(GL3_NODE, CUBIC_INNER);',
+    'i == 5u) { return vec2<f32>(2.0 * GL3_NODE, CUBIC_MID);',
+    'return vec2<f32>(3.0 * GL3_NODE, CUBIC_OUTER);',
+  ]) assert.ok(source.includes(line), line);
+  // Tap weights integrate the residual profile exactly (they sum to one).
+  for (const { taps } of Object.values(KERNELS)) {
+    const total = taps.reduce((sum, [, weight]) => sum + weight, 0);
+    assert.ok(Math.abs(total - 1) < 1e-15);
+    assert.ok(Object.isFrozen(taps));
+    assert.ok(taps.every(Object.isFrozen));
+  }
+});
+
+test('box keeps its direct backward and multi-tap pieces sum taps before atomics', async () => {
+  const source = await readFile(new URL('../../js/wgsl/render.wgsl', import.meta.url), 'utf8');
+  const start = source.indexOf('if (FILTER_KERNEL == KERNEL_BOX) {', source.indexOf('fn backward('));
+  const end = source.indexOf('P *= (1.0 - a);', start);
+  const backward = source.slice(start, end);
+  const boxPieceLoop = backward.indexOf('for (var p = 0u; p < count; p++)');
+  const boxAtomic = backward.indexOf('add_piece_grad(o, g.dq1.x);', boxPieceLoop);
+  const multi = backward.indexOf('} else {');
+  const pieceLoop = backward.indexOf('for (var p = 0u; p < count; p++)', multi);
+  const rowLoop = backward.indexOf('for (var j = 0u; j < taps; j++)', pieceLoop);
+  const tapLoop = backward.indexOf('for (var i = 0u; i < taps; i++)', rowLoop);
+  const accumulation = backward.indexOf('dq1 += g.dq1;', tapLoop);
+  const atomic = backward.indexOf('add_piece_grad(o, dq1.x);', accumulation);
+  assert.ok(start >= 0 && end > start);
+  assert.ok(boxPieceLoop >= 0 && boxAtomic > boxPieceLoop && boxAtomic < multi);
+  assert.ok(pieceLoop > multi && rowLoop > pieceLoop && tapLoop > rowLoop);
+  assert.ok(accumulation > tapLoop && atomic > accumulation);
+  // No atomic inside the tap loops: one fixed-point add per piece coordinate.
+  assert.doesNotMatch(backward.slice(rowLoop, accumulation), /add_piece_grad/);
 });
 
 test('tile count uses the same f32 settings as the GPU', () => {
@@ -197,6 +284,85 @@ test('renderer grows compact storage and refreshes every dependent bind group', 
     else globalThis.GPUBufferUsage = previousUsage;
   }
   assert(buffers.every(({ destroyed }) => destroyed));
+});
+
+test('kernels specialize the filter pipelines once each and rebind on switch', async () => {
+  const previousUsage = globalThis.GPUBufferUsage;
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1, COPY_DST: 2, COPY_SRC: 4, UNIFORM: 8,
+  };
+  const pipelines = [];
+  const bindGroups = [];
+  const device = {
+    limits: { maxBufferSize: 1 << 30, maxStorageBufferBindingSize: 1 << 29 },
+    queue: { writeBuffer() {} },
+    createShaderModule: () => ({ getCompilationInfo: async () => ({ messages: [] }) }),
+    createComputePipeline: ({ compute }) => {
+      const layout = {};
+      const pipe = {
+        entryPoint: compute.entryPoint,
+        constants: compute.constants ?? {},
+        layout,
+        getBindGroupLayout: () => layout,
+      };
+      pipelines.push(pipe);
+      return pipe;
+    },
+    createBuffer: ({ size }) => ({ size, destroy() {} }),
+    createBindGroup: (descriptor) => {
+      bindGroups.push(descriptor);
+      return descriptor;
+    },
+  };
+  const scene = {
+    pieceData: new Float32Array(),
+    pieceCount: 0,
+    shapeData: shapeData([{ bbox: [0, 0, 7, 7] }]),
+    curveMetaData: new Float32Array(),
+    curveCount: 0,
+  };
+  const filtered = () => pipelines.filter(({ constants }) => 'FILTER_KERNEL' in constants);
+  const FILTERED = ['forward', 'backward', 'bin_count', 'bin_fill'];
+  try {
+    const renderer = await Renderer.create(device, {
+      width: 8, height: 8, maxPieces: 0, maxShapes: 1, maxCurves: 0,
+    });
+    assert.deepEqual(filtered().map(({ entryPoint }) => entryPoint).sort(), [...FILTERED].sort());
+    assert(filtered().every(({ constants }) => constants.FILTER_KERNEL === KERNELS.box.code));
+    assert.equal(renderer.fwdPipe.constants.BLEND_MODE, 0);
+
+    renderer.uploadScene(scene, { ...settings, width: 8, height: 8, kernel: 'tent' });
+    assert.equal(filtered().length, 8);
+    assert(filtered().slice(-4).every(({ constants }) => constants.FILTER_KERNEL === KERNELS.tent.code));
+    assert.equal(renderer.fwdPipe.constants.FILTER_KERNEL, KERNELS.tent.code);
+    assert.equal(renderer.bwdPipe.constants.TRAIN_GEOMETRY, 1);
+    for (const [pipe, bind] of [
+      ['fwdPipe', 'fwdBind'], ['bwdPipe', 'bwdBind'],
+      ['binCountPipe', 'binCountBind'], ['binFillPipe', 'binFillBind'],
+    ]) assert.equal(renderer[bind].layout, renderer[pipe].layout, bind);
+
+    renderer.uploadTarget(new Float32Array(8 * 8 * 4));
+    const fused = () => pipelines.filter(({ entryPoint }) => entryPoint === 'forward_l2');
+    assert.equal(fused().length, 1);
+    assert.equal(renderer.fwdL2Pipe.constants.FILTER_KERNEL, KERNELS.tent.code);
+    assert.equal(renderer.fwdL2Bind.layout, renderer.fwdL2Pipe.layout);
+
+    renderer.uploadScene(scene, { ...settings, width: 8, height: 8 });
+    assert.equal(filtered().length, 10);
+    assert.equal(renderer.fwdPipe.constants.FILTER_KERNEL, KERNELS.box.code);
+    assert.equal(renderer.fwdL2Pipe.constants.FILTER_KERNEL, KERNELS.box.code);
+    assert.equal(renderer.fwdL2Bind.layout, renderer.fwdL2Pipe.layout);
+    renderer.uploadScene(scene, { ...settings, width: 8, height: 8, kernel: 'tent' });
+    assert.equal(filtered().length, 10);
+    assert.throws(
+      () => renderer.uploadScene(scene, { ...settings, kernel: 'gauss' }),
+      /unknown filter kernel/,
+    );
+    renderer.destroy();
+  } finally {
+    if (previousUsage === undefined) delete globalThis.GPUBufferUsage;
+    else globalThis.GPUBufferUsage = previousUsage;
+  }
 });
 
 test('blend modes validate, specialize pipelines, and skip the painter sort', async () => {

@@ -15,6 +15,7 @@ import {
 } from '../demos/util/image.js';
 import { arg, argList, parseArgs, slug, stamp } from '../demos/util/runtime.js';
 import { BLUR_ANNEAL_FRACTION, createInit, serializeInit } from '../demos/util/model.js';
+import { resolveKernel } from '../js/filter-kernels.js';
 import { parseOptSizes, resolveOptSize } from '../demos/util/opt-size.js';
 import {
   WINDFOIL_ENVIRONMENTS,
@@ -64,6 +65,8 @@ const counts = nonEmpty(argList(options, 'n', DEFAULT_N), 'n').map((value) => in
 const repeats = integer(arg(options, 'repeats', 1), 'repeats');
 const sizeSpec = parseOptSizes([arg(options, 'opt-size', 128)])[0];
 const k = integer(arg(options, 'k', 8), 'k');
+const kernel = String(arg(options, 'kernel', 'box'));
+resolveKernel(kernel); // throws with the accepted kernel names
 const scheduleSteps = integer(arg(options, 'schedule-steps', 800), 'schedule-steps');
 const baseSeed = integer(arg(options, 'seed', 1), 'seed', { allowZero: true });
 const force = boolean(arg(options, 'force', false));
@@ -145,6 +148,8 @@ const configBase = {
   windfoil_variants: windfoilVariants,
   n: counts,
   k,
+  // Box stays out of the key so existing suites still match.
+  ...(kernel === 'box' ? {} : { kernel }),
   schedule_steps: scheduleSteps,
   opt_size: [width, height],
   opt_size_requested: sizeSpec,
@@ -301,6 +306,7 @@ function commandFor({ environment, variant, loss, n, seed, budget, init, cell })
   const windfoilArgs = [
     windfoilCli, loss, ...common,
     '--opt-size', windfoilSize,
+    ...(kernel === 'box' ? [] : ['--kernel', kernel]),
     '--blur', '1',
     '--blur-start', variant === 'crisp' ? '1' : '7',
     // sigmoid rather than identity keeps every decode displayable, which is the
@@ -381,6 +387,7 @@ function metadata({ runId, environment, variant, loss, n, k, width, height, seed
       variant,
       engine_options: variant ? {
         style: windfoilStyle,
+        ...(kernel === 'box' ? {} : { kernel }),
         ...(windfoilStyle === 'raw' ? { color_lr: RAW_COLOR_LR } : {}),
         blur_anneal: variant === 'anneal',
         blur_start: variant === 'anneal' ? 7 : 1,

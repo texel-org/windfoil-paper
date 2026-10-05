@@ -1,4 +1,5 @@
 import { optimize } from '../../js/optimize.js';
+import { resolveKernel } from '../../js/filter-kernels.js';
 import { packScene } from '../../js/prep.js';
 import { getWebGPUHostInfo, Renderer, requestDevice } from '../../js/renderer.js';
 import { parseFillSvg, rasterSize } from '../render/svg.js';
@@ -14,12 +15,13 @@ export const ROUNDTRIP_DEFAULTS = Object.freeze({
   svg: 'demos/roundtrip/star-evenodd.svg',
   optSize: 512,
   steps: 100,
+  kernel: 'box',
   blur: 1,
   offset: null,
 });
 
 const OPTION_NAMES = new Set([
-  'svg', 'opt-size', 'steps', 'blur', 'blur-start', 'offset', 'save-every', 'out', 'quiet',
+  'svg', 'opt-size', 'steps', 'kernel', 'blur', 'blur-start', 'offset', 'save-every', 'out', 'quiet',
 ]);
 
 function positiveInteger(value, name) {
@@ -42,6 +44,11 @@ function requiredString(value, name) {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`--${name} requires a value`);
   }
+  return value;
+}
+
+function kernelName(value) {
+  resolveKernel(value); // throws with the accepted kernel names
   return value;
 }
 
@@ -99,6 +106,7 @@ export function parseRoundtripArgs(argv) {
     steps: raw.has('steps')
       ? positiveInteger(raw.get('steps'), 'steps')
       : ROUNDTRIP_DEFAULTS.steps,
+    kernel: raw.has('kernel') ? kernelName(raw.get('kernel')) : ROUNDTRIP_DEFAULTS.kernel,
     blur,
     blurStart,
     offset: raw.has('offset') ? parseOffset(raw.get('offset')) : ROUNDTRIP_DEFAULTS.offset,
@@ -120,7 +128,7 @@ export function resolveRoundtripOffset(offset, viewBox) {
 }
 
 /** Renderer settings expressed in the SVG's curve coordinate space. */
-export function roundtripRenderSettings(raster, background, blurPixels = 1) {
+export function roundtripRenderSettings(raster, background, blurPixels = 1, kernel = 'box') {
   if (!Number.isFinite(raster?.scale) || raster.scale <= 0) {
     throw new Error('raster scale must be positive');
   }
@@ -136,6 +144,7 @@ export function roundtripRenderSettings(raster, background, blurPixels = 1) {
     scale: raster.scale,
     origin: Array.from(raster.origin),
     bg: Array.from(background),
+    kernel,
   };
 }
 
@@ -209,6 +218,7 @@ export async function runRoundtrip(argv) {
       raster,
       background,
       annealedBlur(step, options.steps, options.blurStart, options.blur),
+      options.kernel,
     );
     const onStep = options.quiet && !options.saveEvery ? null : async ({ step, loss }) => {
       if (!options.quiet && (step === 1 || step % logEvery === 0)) {
@@ -259,6 +269,7 @@ export async function runRoundtrip(argv) {
       shapes: parsed.shapes.length,
       curves: targetScene.curveCount,
       steps: options.steps,
+      kernel: options.kernel,
       blur: options.blur,
       blurStart: options.blurStart,
       offset,

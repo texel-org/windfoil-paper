@@ -1,4 +1,4 @@
-"""Small JAX oracle for the box-filtered Windfoil shader."""
+"""Small JAX oracle for the Windfoil shader's analytic filter kernels."""
 
 import jax
 import jax.numpy as jnp
@@ -7,6 +7,33 @@ import jax.numpy as jnp
 _TINY = 1e-12
 _FOLD_EPS = 1e-5
 _COMPOSITE_EPS = 1e-5
+
+# Per-axis (offset, weight) taps in units of s; must match js/filter-kernels.js.
+_GL3_NODE = 0.3872983346207417  # sqrt(3/5) / 2
+_CUBIC_OUTER = 0.021433470507544582  # 125/5832
+_CUBIC_MID = 0.102880658436214  # 25/243
+_CUBIC_INNER = 0.22890946502057613  # 445/1944
+_CUBIC_CENTER = 0.2935528120713306  # 214/729
+_KERNEL_TAPS = {
+    "box": ((0.0, 1.0),),
+    "tent": ((-_GL3_NODE, 5.0 / 18.0), (0.0, 8.0 / 18.0), (_GL3_NODE, 5.0 / 18.0)),
+    "cubic": (
+        (-3.0 * _GL3_NODE, _CUBIC_OUTER),
+        (-2.0 * _GL3_NODE, _CUBIC_MID),
+        (-_GL3_NODE, _CUBIC_INNER),
+        (0.0, _CUBIC_CENTER),
+        (_GL3_NODE, _CUBIC_INNER),
+        (2.0 * _GL3_NODE, _CUBIC_MID),
+        (3.0 * _GL3_NODE, _CUBIC_OUTER),
+    ),
+}
+
+
+def _kernel_taps(kernel):
+    taps = _KERNEL_TAPS.get(kernel)
+    if taps is None:
+        raise ValueError(f"unsupported filter kernel: {kernel!r}")
+    return taps
 
 
 def loop_to_curves(anchors, controls):
@@ -125,19 +152,30 @@ def _as_float(curves):
     return curves if jnp.issubdtype(curves.dtype, jnp.inexact) else curves.astype(jnp.float32)
 
 
-def _winding(pieces, centers, size):
+def _box_area(pieces, centers, hx, hy):
     relative = pieces - centers[..., None, None, :]
-    sx, sy = size[0], size[1]
-    hx, hy = 0.5 * sx, 0.5 * sy
     q1, q2, q3 = relative[..., 0, :], relative[..., 1, :], relative[..., 2, :]
     outside_y = (jnp.maximum(q1[..., 1], q3[..., 1]) < -hy) | (
         jnp.minimum(q1[..., 1], q3[..., 1]) > hy
     )
     outside_left = jnp.maximum(q1[..., 0], jnp.maximum(q2[..., 0], q3[..., 0])) < -hx
     areas = integrate_piece(relative, -hy, hy, hx)
-    areas = jnp.where(outside_y | outside_left, 0.0, areas)
+    return jnp.where(outside_y | outside_left, 0.0, areas).sum(-1)
+
+
+def _winding(pieces, centers, size, kernel="box"):
+    taps = _kernel_taps(kernel)
+    sx, sy = size[0], size[1]
+    hx, hy = 0.5 * sx, 0.5 * sy
+    total = 0.0
+    for node_y, weight_y in taps:
+        for node_x, weight_x in taps:
+            offset = jnp.stack((node_x * sx, node_y * sy), axis=-1)
+            total = total + (weight_x * weight_y) * _box_area(
+                pieces, centers + offset, hx, hy
+            )
     product = sx * sy
-    return areas.sum(-1) / jnp.where(product == 0.0, 1.0, product)
+    return total / jnp.where(product == 0.0, 1.0, product)
 
 
 def _fold_nonzero(winding):
@@ -168,7 +206,8 @@ def _fold_coverage(winding, fill_rule_code):
     return jnp.where(fill_rule_code == 1, _fold_evenodd(winding), _fold_nonzero(winding))
 
 
-def _coverage_image(curves, height, width, s, scale, origin, fill_rule_code):
+def _coverage_image(curves, height, width, s, scale, origin, fill_rule_code,
+                    kernel="box"):
     curves = _as_float(curves)
     pieces = split_monotone(curves).reshape(-1, 3, 2)
     size = jnp.broadcast_to(jnp.asarray(s, dtype=curves.dtype), (2,))
@@ -176,14 +215,15 @@ def _coverage_image(curves, height, width, s, scale, origin, fill_rule_code):
     ys = origin[1] + (jnp.arange(height, dtype=curves.dtype) + 0.5) * scale
     xx, yy = jnp.meshgrid(xs, ys)
     centers = jnp.stack((xx, yy), axis=-1)
-    return _fold_coverage(_winding(pieces, centers, size), fill_rule_code)
+    return _fold_coverage(_winding(pieces, centers, size, kernel), fill_rule_code)
 
 
 def coverage_image(curves, height, width, s, *, scale=1.0, origin=(0.0, 0.0),
-                   fill_rule="nonzero"):
-    """Render Windfoil's box-averaged-winding fill approximation on a grid."""
+                   fill_rule="nonzero", kernel="box"):
+    """Render Windfoil's filter-averaged-winding fill approximation on a grid."""
+    _kernel_taps(kernel)
     return _coverage_image(
-        curves, height, width, s, scale, origin, _fill_rule_code(fill_rule)
+        curves, height, width, s, scale, origin, _fill_rule_code(fill_rule), kernel
     )
 
 
@@ -273,8 +313,9 @@ def composite_scene(coverages, colors, alphas, background=(1.0, 1.0, 1.0),
 
 def render_scene(curves, colors, alphas, height, width, s, *,
                  background=(1.0, 1.0, 1.0), scale=1.0, origin=(0.0, 0.0),
-                 fill_rules=None, blend="src-over"):
+                 fill_rules=None, blend="src-over", kernel="box"):
     """Render stacked closed-curve shapes; index 0 is the bottom layer."""
+    _kernel_taps(kernel)
     curves = _as_float(curves)
     if fill_rules is None:
         rule_codes = jnp.zeros((curves.shape[0],), dtype=jnp.uint32)
@@ -283,20 +324,24 @@ def render_scene(curves, colors, alphas, height, width, s, *,
             raise ValueError("fill_rules must contain one rule per shape")
         rule_codes = jnp.asarray([_fill_rule_code(rule) for rule in fill_rules], dtype=jnp.uint32)
     coverages = jax.vmap(
-        lambda shape, rule: _coverage_image(shape, height, width, s, scale, origin, rule)
+        lambda shape, rule: _coverage_image(
+            shape, height, width, s, scale, origin, rule, kernel
+        )
     )(curves, rule_codes)
     return composite_scene(coverages, colors, alphas, background, blend)
 
 
 def render_scene_ragged(curves, colors, alphas, height, width, s, *,
                         background=(1.0, 1.0, 1.0), scale=1.0, origin=(0.0, 0.0),
-                        fill_rules=None, blend="src-over", shape_s=None):
+                        fill_rules=None, blend="src-over", shape_s=None,
+                        kernel="box"):
     """Render shapes with differing curve counts; ``curves`` is a Python sequence.
 
     ``shape_s`` optionally overrides the global filter per shape (one scalar
     or ``(sx, sy)`` pair per shape, indexable like an array) and is
     differentiable -- the reference for the shader's per-shape blur training.
     """
+    _kernel_taps(kernel)
     count = len(curves)
     if fill_rules is None:
         fill_rules = ("nonzero",) * count
@@ -306,7 +351,7 @@ def render_scene_ragged(curves, colors, alphas, height, width, s, *,
         _coverage_image(
             _as_float(shape), height, width,
             s if shape_s is None else shape_s[index],
-            scale, origin, _fill_rule_code(rule),
+            scale, origin, _fill_rule_code(rule), kernel,
         )
         for index, (shape, rule) in enumerate(zip(curves, fill_rules))
     ])
@@ -315,11 +360,11 @@ def render_scene_ragged(curves, colors, alphas, height, width, s, *,
 
 def scene_image(anchors, controls, colors, alphas, height, width, s, *,
                 background=(1.0, 1.0, 1.0), scale=1.0, origin=(0.0, 0.0),
-                fill_rules=None, blend="src-over"):
+                fill_rules=None, blend="src-over", kernel="box"):
     """VJP-friendly scene entry point over loop anchors and controls."""
     curves = jax.vmap(loop_to_curves)(_as_float(anchors), _as_float(controls))
     return render_scene(
         curves, colors, alphas, height, width, s,
         background=background, scale=scale, origin=origin, fill_rules=fill_rules,
-        blend=blend,
+        blend=blend, kernel=kernel,
     )

@@ -15,6 +15,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from oracle import (  # noqa: E402
     _fold_evenodd,
     _fold_nonzero,
+    _winding,
     composite_scene,
     coverage_image,
     integrate_piece,
@@ -22,6 +23,7 @@ from oracle import (  # noqa: E402
     render_scene,
     render_scene_ragged,
     scene_image,
+    split_monotone,
     tonemap_reinhard,
     tonemap_reinhard_white,
     tonemap_smooth,
@@ -118,6 +120,165 @@ def test_fill_rules():
         pass
     else:
         raise AssertionError("invalid fill rule was accepted")
+
+
+def test_tent_kernel_coverage():
+    height, width, size = 24, 28, 3.25
+    x0, y0, x1, y1 = 5.3, 4.4, 21.7, 18.2
+    actual = np.asarray(coverage_image(
+        rectangle(x0, y0, x1, y1), height, width, size, kernel="tent"
+    ))
+
+    xs, ys = np.arange(width) + 0.5, np.arange(height) + 0.5
+
+    def box_axis(lo, hi, centers):
+        return np.clip(
+            np.minimum(hi, centers + size / 2) - np.maximum(lo, centers - size / 2),
+            0, None,
+        ) / size
+
+    node = 0.3872983346207417
+    taps = ((-node, 5.0 / 18.0), (0.0, 8.0 / 18.0), (node, 5.0 / 18.0))
+    expected = 0.0
+    for node_y, weight_y in taps:
+        for node_x, weight_x in taps:
+            expected = expected + (weight_x * weight_y) * (
+                box_axis(y0, y1, ys + node_y * size)[:, None]
+                * box_axis(x0, x1, xs + node_x * size)[None, :]
+            )
+    assert np.max(np.abs(actual - expected)) < 2e-10
+
+    # Close to the exact tent.
+    def tent_axis(lo, hi, centers):
+        def antiderivative(v):
+            v = np.clip(v, -1.0, 1.0)
+            return 0.5 + v - np.sign(v) * v * v / 2
+        return antiderivative((hi - centers) / size) - antiderivative((lo - centers) / size)
+
+    exact = tent_axis(y0, y1, ys)[:, None] * tent_axis(x0, x1, xs)[None, :]
+    assert np.max(np.abs(actual - exact)) < 0.03
+
+    try:
+        coverage_image(rectangle(x0, y0, x1, y1), 1, 1, 1.0, kernel="gauss")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid kernel was accepted")
+
+
+def test_tent_kernel_gradient():
+    anchors, controls = pentagram(radius=10.7)
+    yy, xx = jnp.meshgrid(jnp.arange(25), jnp.arange(27), indexing="ij")
+    weights = 0.7 + 0.2 * jnp.sin(0.31 * xx + 0.17 * yy)
+
+    def loss(a):
+        curves = loop_to_curves(a, controls)
+        coverage = coverage_image(
+            curves, 25, 27, 2.7, origin=(3.0, 4.0), kernel="tent"
+        )
+        return jnp.mean(coverage * weights)
+
+    index = (2, 0)
+    autodiff = float(jax.grad(loss)(anchors)[index])
+    step = 1e-5
+    plus = anchors.at[index].add(step)
+    minus = anchors.at[index].add(-step)
+    reference = float((loss(plus) - loss(minus)) / (2.0 * step))
+    relative = abs(autodiff - reference) / max(abs(reference), 1e-10)
+    assert relative < 3e-4, (autodiff, reference, relative)
+
+
+def test_cubic_kernel_coverage():
+    height, width, size = 24, 28, 3.25
+    x0, y0, x1, y1 = 5.3, 4.4, 21.7, 18.2
+    actual = np.asarray(coverage_image(
+        rectangle(x0, y0, x1, y1), height, width, size, kernel="cubic"
+    ))
+    xs, ys = np.arange(width) + 0.5, np.arange(height) + 0.5
+
+    def box_axis(lo, hi, centers):
+        return np.clip(
+            np.minimum(hi, centers + size / 2) - np.maximum(lo, centers - size / 2),
+            0, None,
+        ) / size
+
+    node = 0.3872983346207417
+    taps = (
+        (-3 * node, 125.0 / 5832.0),
+        (-2 * node, 25.0 / 243.0),
+        (-node, 445.0 / 1944.0),
+        (0.0, 214.0 / 729.0),
+        (node, 445.0 / 1944.0),
+        (2 * node, 25.0 / 243.0),
+        (3 * node, 125.0 / 5832.0),
+    )
+    expected = 0.0
+    for node_y, weight_y in taps:
+        for node_x, weight_x in taps:
+            expected = expected + (weight_x * weight_y) * (
+                box_axis(y0, y1, ys + node_y * size)[:, None]
+                * box_axis(x0, x1, xs + node_x * size)[None, :]
+            )
+    assert np.max(np.abs(actual - expected)) < 2e-10
+
+    # Close to the exact cubic B-spline (box^4).
+    def cubic_axis(lo, hi, centers):
+        def cdf(value):
+            t = value + 2.0
+            positive4 = lambda x: np.maximum(x, 0.0) ** 4
+            return (
+                positive4(t)
+                - 4.0 * positive4(t - 1.0)
+                + 6.0 * positive4(t - 2.0)
+                - 4.0 * positive4(t - 3.0)
+                + positive4(t - 4.0)
+            ) / 24.0
+        return cdf((hi - centers) / size) - cdf((lo - centers) / size)
+
+    exact = cubic_axis(y0, y1, ys)[:, None] * cubic_axis(x0, x1, xs)[None, :]
+    assert np.max(np.abs(actual - exact)) < 0.011
+
+
+def test_cubic_kernel_gradient():
+    anchors, controls = pentagram(center=(9.5, 8.5), radius=5.8)
+    yy, xx = jnp.meshgrid(jnp.arange(13), jnp.arange(15), indexing="ij")
+    weights = 0.7 + 0.2 * jnp.sin(0.31 * xx + 0.17 * yy)
+
+    def loss(a):
+        curves = loop_to_curves(a, controls)
+        coverage = coverage_image(
+            curves, 13, 15, 2.7, origin=(2.0, 2.0), kernel="cubic"
+        )
+        return jnp.mean(coverage * weights)
+
+    index = (2, 0)
+    autodiff = float(jax.grad(loss)(anchors)[index])
+    step = 1e-5
+    plus = anchors.at[index].add(step)
+    minus = anchors.at[index].add(-step)
+    reference = float((loss(plus) - loss(minus)) / (2.0 * step))
+    relative = abs(autodiff - reference) / max(abs(reference), 1e-10)
+    assert relative < 5e-4, (autodiff, reference, relative)
+
+
+def test_kernel_filter_size_euler_identity():
+    # The shader's blur adjoint: dF/ds = -sum((p - c) dF/dp) / s.
+    anchors, controls = pentagram(center=(9.5, 8.5), radius=5.8)
+    curves = loop_to_curves(anchors, controls)
+    center = jnp.asarray([8.3, 9.1])
+    sx, sy = 3.1, 2.4
+    for kernel in ("box", "tent", "cubic"):
+        def winding(c, fx, fy):
+            pieces = split_monotone(c).reshape(-1, 3, 2)
+            return _winding(pieces, center, jnp.stack((fx, fy)), kernel)
+
+        dc, dsx, dsy = jax.grad(winding, argnums=(0, 1, 2))(curves, sx, sy)
+        relative = curves - center
+        euler_x = -float(jnp.sum(relative[..., 0] * dc[..., 0])) / sx
+        euler_y = -float(jnp.sum(relative[..., 1] * dc[..., 1])) / sy
+        assert abs(float(dsx)) > 1e-4 and abs(float(dsy)) > 1e-4, kernel
+        assert abs(float(dsx) - euler_x) < 1e-9 * max(1.0, abs(euler_x)), (kernel, dsx, euler_x)
+        assert abs(float(dsy) - euler_y) < 1e-9 * max(1.0, abs(euler_y)), (kernel, dsy, euler_y)
 
 
 def test_fill_rule_cusp_gradients_match_shader():
@@ -319,6 +480,11 @@ def test_tonemap():
 if __name__ == "__main__":
     test_rectangle()
     test_fill_rules()
+    test_tent_kernel_coverage()
+    test_tent_kernel_gradient()
+    test_cubic_kernel_coverage()
+    test_cubic_kernel_gradient()
+    test_kernel_filter_size_euler_identity()
     test_fill_rule_cusp_gradients_match_shader()
     test_evenodd_geometry_gradient()
     test_geometry_gradient()

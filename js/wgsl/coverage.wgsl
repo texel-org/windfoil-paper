@@ -1,6 +1,55 @@
 // Windfoil box coverage and its analytic VJP: monotone-piece root finding,
 // the exact box-filtered area integral, and the shape-level winding fold.
 
+// ------------------------------------------------------------ filter kernels
+// Box integral composed with per-axis taps; must match js/filter-kernels.js.
+
+const KERNEL_BOX : u32 = 0u;
+const KERNEL_TENT : u32 = 1u;
+const KERNEL_CUBIC : u32 = 2u;
+override FILTER_KERNEL : u32 = KERNEL_BOX;
+
+// 3-point Gauss-Legendre rule on [-1/2, 1/2].
+const GL3_NODE : f32 = 0.3872983346207417;
+const GL3_EDGE : f32 = 0.2777777777777778;
+const GL3_CENTER : f32 = 0.4444444444444444;
+
+// Three GL3 rules collapsed to seven taps (cubic B-spline).
+const CUBIC_OUTER : f32 = 0.021433470507544582;
+const CUBIC_MID : f32 = 0.102880658436214;
+const CUBIC_INNER : f32 = 0.22890946502057613;
+const CUBIC_CENTER : f32 = 0.2935528120713306;
+
+fn kernel_tap_count() -> u32 {
+  if (FILTER_KERNEL == KERNEL_CUBIC) { return 7u; }
+  return select(1u, 3u, FILTER_KERNEL == KERNEL_TENT);
+}
+
+// The i-th per-axis tap as (offset, weight) in units of s.
+fn kernel_tap(i : u32) -> vec2<f32> {
+  if (FILTER_KERNEL == KERNEL_CUBIC) {
+    if (i == 0u) { return vec2<f32>(-3.0 * GL3_NODE, CUBIC_OUTER); }
+    if (i == 1u) { return vec2<f32>(-2.0 * GL3_NODE, CUBIC_MID); }
+    if (i == 2u) { return vec2<f32>(-GL3_NODE, CUBIC_INNER); }
+    if (i == 3u) { return vec2<f32>(0.0, CUBIC_CENTER); }
+    if (i == 4u) { return vec2<f32>(GL3_NODE, CUBIC_INNER); }
+    if (i == 5u) { return vec2<f32>(2.0 * GL3_NODE, CUBIC_MID); }
+    return vec2<f32>(3.0 * GL3_NODE, CUBIC_OUTER);
+  }
+  if (FILTER_KERNEL == KERNEL_TENT) {
+    if (i == 0u) { return vec2<f32>(-GL3_NODE, GL3_EDGE); }
+    if (i == 1u) { return vec2<f32>(0.0, GL3_CENTER); }
+    return vec2<f32>(GL3_NODE, GL3_EDGE);
+  }
+  return vec2<f32>(0.0, 1.0);
+}
+
+// Support half-width in units of s.
+fn kernel_radius() -> f32 {
+  if (FILTER_KERNEL == KERNEL_CUBIC) { return 2.0; }
+  return select(0.5, 1.0, FILTER_KERNEL == KERNEL_TENT);
+}
+
 // ---------------------------------------------------------------- mono_root
 
 fn mono_root(A : f32, B : f32, a0 : f32, e1 : f32, v : f32, rising : bool) -> f32 {
@@ -327,12 +376,9 @@ fn shape_filter(si : u32) -> vec2<f32> {
   return select(U.s, f, f.x > 0.0);
 }
 
-fn shape_winding(si : u32, cx : f32, cy : f32) -> f32 {
+fn box_area(si : u32, cx : f32, cy : f32, hx : f32, hy : f32) -> f32 {
   let sh = shapes[si];
-  let sf = shape_filter(si);
-  let hx = 0.5 * sf.x;
-  let hy = 0.5 * sf.y;
-  var F = 0.0;
+  var A = 0.0;
   let start = sh.info.x;
   let count = sh.info.y;
   for (var p = 0u; p < count; p++) {
@@ -349,7 +395,26 @@ fn shape_winding(si : u32, cx : f32, cy : f32) -> f32 {
     let q1 = vec2<f32>(q1x, q1y);
     let q2 = vec2<f32>(q2x, pieces[o + 3] - cy);
     let q3 = vec2<f32>(q3x, q3y);
-    F += integrate_piece(q1, q2, q3, -hy, hy, hx);
+    A += integrate_piece(q1, q2, q3, -hy, hy, hx);
+  }
+  return A;
+}
+
+fn shape_winding(si : u32, cx : f32, cy : f32) -> f32 {
+  let sf = shape_filter(si);
+  let hx = 0.5 * sf.x;
+  let hy = 0.5 * sf.y;
+  if (FILTER_KERNEL == KERNEL_BOX) {
+    return box_area(si, cx, cy, hx, hy) / (sf.x * sf.y);
+  }
+  var F = 0.0;
+  let taps = kernel_tap_count();
+  for (var j = 0u; j < taps; j++) {
+    let ty = kernel_tap(j);
+    for (var i = 0u; i < taps; i++) {
+      let tx = kernel_tap(i);
+      F += (tx.y * ty.y) * box_area(si, cx + tx.x * sf.x, cy + ty.x * sf.y, hx, hy);
+    }
   }
   return F / (sf.x * sf.y);
 }
@@ -373,8 +438,9 @@ fn coverage_fold(winding : f32, fill_rule : u32) -> vec2<f32> {
 
 fn in_bbox(si : u32, cx : f32, cy : f32) -> bool {
   let sf = shape_filter(si);
-  let hx = 0.5 * sf.x;
-  let hy = 0.5 * sf.y;
+  let r = kernel_radius();
+  let hx = r * sf.x;
+  let hy = r * sf.y;
   let b = shapes[si].bbox;
   return cx >= b.x - hx && cx <= b.z + hx && cy >= b.y - hy && cy <= b.w + hy;
 }

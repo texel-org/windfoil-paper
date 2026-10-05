@@ -1,0 +1,188 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chrome SVG rasterizer</title>
+
+<style>
+  body {
+    margin: 24px;
+    color: #111;
+    background: #eee;
+    font:
+      14px/1.4 system-ui,
+      sans-serif;
+  }
+
+  #drop {
+    margin: 16px 0;
+    padding: 32px;
+    border: 2px dashed #777;
+    background: #fff;
+    text-align: center;
+  }
+
+  body.dragging #drop {
+    border-color: #06c;
+  }
+  section {
+    margin: 32px 0;
+  }
+  canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 8px 0;
+    border: 1px solid #bbb;
+    background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 / 16px 16px;
+  }
+</style>
+
+<h1>Chrome SVG → PNG</h1>
+<p>
+  Drop a Windfoil moiré SVG below. Each copy is decoded at its final canvas
+  size, so Chrome rasterizes the vector independently at 256, 512, and 1024px.
+  Right-click a canvas to save its native-resolution PNG.
+</p>
+
+<div id="drop">
+  Drop an SVG here or <button id="choose" type="button">choose one</button>
+  <input id="file" type="file" accept=".svg,image/svg+xml" hidden />
+</div>
+<p id="status">No SVG loaded.</p>
+<main id="outputs"></main>
+
+<script>
+  const sizes = [256, 512, 1024];
+  const drop = document.querySelector("#drop");
+  const choose = document.querySelector("#choose");
+  const fileInput = document.querySelector("#file");
+  const status = document.querySelector("#status");
+  const outputs = document.querySelector("#outputs");
+  let sourceName = "moire";
+
+  const canvases = sizes.map((size) => {
+    const section = document.createElement("section");
+    const heading = document.createElement("h2");
+    const canvas = document.createElement("canvas");
+    const save = document.createElement("button");
+
+    heading.textContent = `${size} × ${size}`;
+    canvas.width = size;
+    canvas.height = size;
+    canvas.setAttribute("aria-label", `${size} by ${size} Chrome raster`);
+    save.type = "button";
+    save.textContent = `Save ${size}px PNG`;
+    save.disabled = true;
+    save.addEventListener("click", () => {
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${sourceName}-chrome-${size}.png`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      }, "image/png");
+    });
+
+    section.append(heading, canvas, save);
+    outputs.append(section);
+    return { size, canvas, save };
+  });
+
+  function parseSvg(text) {
+    const document = new DOMParser().parseFromString(text, "image/svg+xml");
+    if (
+      document.querySelector("parsererror") ||
+      document.documentElement.localName !== "svg"
+    ) {
+      throw new Error("The dropped file is not valid SVG.");
+    }
+    if (!document.documentElement.hasAttribute("viewBox")) {
+      throw new Error(
+        "The SVG needs a viewBox so each output uses the same framing.",
+      );
+    }
+    return document.documentElement;
+  }
+
+  async function rasterize(svg, { size, canvas }) {
+    const sizedSvg = svg.cloneNode(true);
+    sizedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    sizedSvg.setAttribute("width", String(size));
+    sizedSvg.setAttribute("height", String(size));
+
+    const blob = new Blob([new XMLSerializer().serializeToString(sizedSvg)], {
+      type: "image/svg+xml",
+    });
+    const url = URL.createObjectURL(blob);
+    try {
+      const image = new Image();
+      image.decoding = "sync";
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () =>
+          reject(new Error(`Chrome could not decode the ${size}px SVG.`));
+        image.src = url;
+      });
+      if (image.naturalWidth !== size || image.naturalHeight !== size) {
+        throw new Error(`Chrome decoded ${size}px SVG at an unexpected size.`);
+      }
+
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d", { colorSpace: "srgb" });
+      if (!context) throw new Error("Canvas 2D is unavailable.");
+      context.clearRect(0, 0, size, size);
+      context.drawImage(image, 0, 0, size, size);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function load(file) {
+    if (!file || !file.name.toLowerCase().endsWith(".svg")) {
+      throw new Error("Drop an .svg file.");
+    }
+
+    status.textContent = `Rasterizing ${file.name}…`;
+    canvases.forEach(({ save }) => {
+      save.disabled = true;
+    });
+    const svg = parseSvg(await file.text());
+    sourceName = file.name.replace(/\.svg$/i, "") || "moire";
+
+    for (const output of canvases) await rasterize(svg, output);
+    canvases.forEach(({ save }) => {
+      save.disabled = false;
+    });
+    status.textContent = `${file.name} rasterized by ${navigator.userAgent}`;
+  }
+
+  function report(error) {
+    status.textContent = error instanceof Error ? error.message : String(error);
+    console.error(error);
+  }
+
+  choose.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    load(fileInput.files[0]).catch(report);
+    fileInput.value = "";
+  });
+
+  for (const type of ["dragenter", "dragover"]) {
+    window.addEventListener(type, (event) => {
+      event.preventDefault();
+      document.body.classList.add("dragging");
+    });
+  }
+  for (const type of ["dragleave", "drop"]) {
+    window.addEventListener(type, (event) => {
+      event.preventDefault();
+      document.body.classList.remove("dragging");
+    });
+  }
+  window.addEventListener("drop", (event) => {
+    load([...event.dataTransfer.files][0]).catch(report);
+  });
+</script>

@@ -221,17 +221,21 @@ test('checkpoint filters can be crisp or retain optimization blur', () => {
     scale: 0.5,
     origin: [0, 0],
     s: [0.5, 0.5],
+    kernel: 'box',
     bg: [1, 1, 1],
   });
-  assert.deepEqual(saveFrameSettings({
+  const blurred = saveFrameSettings({
     width: 128,
     height: 128,
     saveWidth: 256,
     saveHeight: 256,
     blur: true,
-    current: { s: [4, 4] },
+    current: { s: [4, 4], kernel: 'cubic' },
     background: [1, 1, 1],
-  }).s, [4, 4]);
+  });
+  assert.deepEqual(blurred.s, [4, 4]);
+  // Blurred checkpoints keep the training kernel; crisp ones render box.
+  assert.equal(blurred.kernel, 'cubic');
 });
 
 test('Windfoil hosts share one runtime mapping', () => {

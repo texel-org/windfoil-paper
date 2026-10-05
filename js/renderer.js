@@ -1,5 +1,6 @@
 // Shared WebGPU host: tiled forward render, analytic VJP, and fused L2.
 
+import { KERNELS, resolveKernel } from './filter-kernels.js';
 import { TONEMAP_DOMAINS, TONEMAP_HAS_WHITE, TONEMAP_MODES } from './tonemap.js';
 
 const WGSL_SOURCES = ['scene', 'coverage', 'binning', 'render']
@@ -272,6 +273,7 @@ export function countTileEntries(shapeData, {
   s,
   scale = 1,
   origin = [0, 0],
+  kernel = 'box',
 }) {
   if (!(shapeData instanceof Float32Array) || shapeData.length % 16 !== 0) {
     throw new Error('shapeData must contain 16 values per shape');
@@ -286,6 +288,8 @@ export function countTileEntries(shapeData, {
   // a large origin can move a bbox on-screen after a smaller CPU count.
   const globalX = positiveF32(s[0], 's[0]');
   const globalY = positiveF32(s[1], 's[1]');
+  // The kernel's support radius (in units of s) mirrors kernel_radius().
+  const kernelRadius = resolveKernel(kernel).radius;
   const pixelScale = positiveF32(scale, 'scale');
   const ox = finiteF32(origin[0], 'origin[0]');
   const oy = finiteF32(origin[1], 'origin[1]');
@@ -307,8 +311,8 @@ export function countTileEntries(shapeData, {
     if (!(sx > 0) || !(sy > 0) || !Number.isFinite(sx + sy)) {
       throw new Error(`shape ${o / 16} filter must be positive and finite`);
     }
-    const hx = 0.5 * sx;
-    const hy = 0.5 * sy;
+    const hx = kernelRadius * sx;
+    const hy = kernelRadius * sy;
     const columns = tileAxisSpan(
       Math.fround(bx0 - hx), Math.fround(bx1 + hx), ox, pixelScale, width, xMargin,
     );
@@ -511,35 +515,12 @@ export class Renderer {
     const pipe = (entryPoint) => d.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
     this.blendCode = BLEND_MODES[this.blend].code;
     this.sorted = BLEND_MODES[this.blend].sorted;
-    this.fwdPipe = d.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module,
-        entryPoint: 'forward',
-        constants: { BLEND_MODE: this.blendCode, OUTPUT_ALPHA: this.outputAlpha ? 1 : 0 },
-      },
-    });
-    this.bwdPipe = d.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module,
-        entryPoint: 'backward',
-        constants: {
-          BLEND_MODE: this.blendCode,
-          TRAIN_GEOMETRY: this.train.geometry ? 1 : 0,
-          TRAIN_COLOR: this.train.colour ? 1 : 0,
-          TRAIN_ALPHA: this.train.alpha ? 1 : 0,
-          TRAIN_BLUR: this.train.blur ? 1 : 0,
-          SHAPE_GRAD_STRIDE: this.gradStride,
-        },
-      },
-    });
-    this.binCountPipe = pipe('bin_count');
+    this._kernelPipes = new Map();
+    this.#selectKernel(KERNELS.box.code);
     this.binScanPipe = pipe('bin_scan');
     this.binScanBlockPipe = pipe('bin_scan_block');
     this.binScanBlocksPipe = pipe('bin_scan_blocks');
     this.binScanAddPipe = pipe('bin_scan_add');
-    this.binFillPipe = pipe('bin_fill');
     // Pipelines are specialized per capacity and cached; the scene picks one.
     // Order-independent blends never sort, so they never build a sort pipeline.
     this.deviceSortCapacity = sortCapacity(d.limits);
@@ -561,11 +542,6 @@ export class Renderer {
 
     const entry = (binding, buffer) => ({ binding, resource: { buffer } });
     const bind = (pipe, entries) => d.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries });
-    this.binCountBind = bind(this.binCountPipe, [
-      entry(0, this.uniforms),
-      entry(1, this.shapesBuf),
-      entry(9, this.tileCountBuf),
-    ]);
     this.binScanBind = bind(this.binScanPipe, [
       entry(0, this.uniforms),
       entry(9, this.tileCountBuf),
@@ -598,6 +574,51 @@ export class Renderer {
       entry(13, this.curveGradsBuf),
     ]) : null;
     this.#refreshTileShapeBindings();
+  }
+
+  // Pipelines that read FILTER_KERNEL, compiled once per kernel.
+  #selectKernel(code) {
+    let pipes = this._kernelPipes.get(code);
+    if (!pipes) {
+      pipes = {
+        fwdPipe: this.#kernelPipeline(code, 'forward', {
+          BLEND_MODE: this.blendCode,
+          OUTPUT_ALPHA: this.outputAlpha ? 1 : 0,
+        }),
+        bwdPipe: this.#kernelPipeline(code, 'backward', {
+          BLEND_MODE: this.blendCode,
+          TRAIN_GEOMETRY: this.train.geometry ? 1 : 0,
+          TRAIN_COLOR: this.train.colour ? 1 : 0,
+          TRAIN_ALPHA: this.train.alpha ? 1 : 0,
+          TRAIN_BLUR: this.train.blur ? 1 : 0,
+          SHAPE_GRAD_STRIDE: this.gradStride,
+        }),
+        binCountPipe: this.#kernelPipeline(code, 'bin_count'),
+        binFillPipe: this.#kernelPipeline(code, 'bin_fill'),
+        fwdL2Pipe: null,
+      };
+      this._kernelPipes.set(code, pipes);
+    }
+    if (this.l2gradPipe && !pipes.fwdL2Pipe) {
+      pipes.fwdL2Pipe = this.#kernelPipeline(code, 'forward_l2', {
+        BLEND_MODE: this.blendCode,
+        OUTPUT_ALPHA: this.outputAlpha ? 1 : 0,
+        TONEMAP: this.tonemapCode,
+      });
+    }
+    this.kernelCode = code;
+    this.fwdPipe = pipes.fwdPipe;
+    this.bwdPipe = pipes.bwdPipe;
+    this.binCountPipe = pipes.binCountPipe;
+    this.binFillPipe = pipes.binFillPipe;
+    this.fwdL2Pipe = pipes.fwdL2Pipe;
+  }
+
+  #kernelPipeline(code, entryPoint, constants = {}) {
+    return this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this.module, entryPoint, constants: { ...constants, FILTER_KERNEL: code } },
+    });
   }
 
   #sortPipeline(capacity) {
@@ -639,6 +660,11 @@ export class Renderer {
     const d = this.device;
     const entry = (binding, buffer) => ({ binding, resource: { buffer } });
     const bind = (pipe, entries) => d.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries });
+    this.binCountBind = bind(this.binCountPipe, [
+      entry(0, this.uniforms),
+      entry(1, this.shapesBuf),
+      entry(9, this.tileCountBuf),
+    ]);
     this.fwdBind = bind(this.fwdPipe, [
       entry(0, this.uniforms),
       entry(1, this.shapesBuf),
@@ -741,37 +767,14 @@ export class Renderer {
       ],
     });
     // Fused forward+L2: same outputs as forward then l2grad, one dispatch.
-    this.fwdL2Pipe = d.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module: this.module,
-        entryPoint: 'forward_l2',
-        constants: {
-          BLEND_MODE: this.blendCode,
-          OUTPUT_ALPHA: this.outputAlpha ? 1 : 0,
-          TONEMAP: this.tonemapCode,
-        },
-      },
-    });
-    this.fwdL2Bind = d.createBindGroup({
-      layout: this.fwdL2Pipe.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniforms } },
-        { binding: 1, resource: { buffer: this.shapesBuf } },
-        { binding: 2, resource: { buffer: this.piecesBuf } },
-        { binding: 3, resource: { buffer: this.imageBuf } },
-        { binding: 4, resource: { buffer: this.dLdImageBuf } },
-        { binding: 7, resource: { buffer: this.targetBuf } },
-        { binding: 8, resource: { buffer: this.lossBuf } },
-        { binding: 10, resource: { buffer: this.tileOffsetBuf } },
-        { binding: 11, resource: { buffer: this.tileShapesBuf } },
-      ],
-    });
+    this.#selectKernel(this.kernelCode);
+    this.#refreshTileShapeBindings();
   }
 
-  // scene: output of prep.packScene; settings: {s:[sx,sy], scale, origin:[x,y], bg:[r,g,b]}
-  uploadScene(scene, { s, scale = 1, origin = [0, 0], bg = [1, 1, 1] }) {
+  // scene: output of prep.packScene; settings: {s:[sx,sy], scale, origin:[x,y], bg:[r,g,b], kernel}
+  uploadScene(scene, { s, scale = 1, origin = [0, 0], bg = [1, 1, 1], kernel = 'box' }) {
     const d = this.device;
+    const kernelCode = resolveKernel(kernel).code;
     // The Reinhard operators keep their pole unreachable only if the whole
     // composite stays nonnegative; the codec-validated color range covers the
     // shapes, and the background is checked here where it arrives.
@@ -802,7 +805,12 @@ export class Renderer {
       s,
       scale,
       origin,
+      kernel,
     });
+    if (kernelCode !== this.kernelCode) {
+      this.#selectKernel(kernelCode);
+      this.#refreshTileShapeBindings();
+    }
     this.#ensureTileEntryCapacity(tileEntries);
     // Pick the sort specialization this scene needs. Guessing low only costs
     // speed -- the serial fallback is exact -- so a mean-based estimate is safe.

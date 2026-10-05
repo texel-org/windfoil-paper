@@ -1,4 +1,5 @@
 import { getWebGPUHostInfo, requestDevice } from '../../js/renderer.js';
+import { resolveKernel } from '../../js/filter-kernels.js';
 import { packScene } from '../../js/prep.js';
 import { parseColor } from '../util/color.js';
 import { letterboxRgba, rgbaToPng } from '../util/image.js';
@@ -45,6 +46,8 @@ await runMain(async (argv) => {
   const debug = booleanArg(options, 'debug', false);
   const chunkOption = arg(options, 'chunk', null);
   const chunk = chunkOption === null ? null : positiveInteger(chunkOption, 'chunk');
+  const kernel = String(arg(options, 'kernel', 'box'));
+  resolveKernel(kernel); // throws with the accepted kernel names
   const fallbackBackground = parseBackground(arg(options, 'background', null));
   const { sources, batch } = await resolveSources(argList(options, 'svg', [DEFAULT_SVG]));
   // Parse every input before touching the GPU so a bad file fails the batch early.
@@ -83,6 +86,7 @@ await runMain(async (argv) => {
       const started = performance.now();
       const { rgba, plan } = await renderChunked(device, scene, raster, {
         s: [raster.scale, raster.scale],
+        kernel,
         bg: renderBackground ?? [0, 0, 0],
         transparent,
         depth,
@@ -114,6 +118,7 @@ await runMain(async (argv) => {
           width: raster.width,
           height: raster.height,
           scale: raster.scale,
+          kernel,
           scaleMode,
           content: raster.content,
           letterboxColor: scaleMode === 'letterbox' ? letterboxColor : null,

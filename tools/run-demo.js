@@ -11,9 +11,11 @@ const entries = {
   plot: ['demos/cli.js', 'plot'],
   roundtrip: ['demos/roundtrip/cli.js'],
   render: ['demos/render/cli.js'],
+  moire: ['demos/moire/cli.js'],
+  comparison: ['demos/comparison/cli.js'],
 };
 if (!entries[demo]) {
-  console.error('usage: tools/run-demo.js <l2|clip|plot|roundtrip|render> [options]');
+  console.error('usage: tools/run-demo.js <l2|clip|plot|roundtrip|render|moire|comparison> [options]');
   process.exit(2);
 }
 

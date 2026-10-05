@@ -59,6 +59,7 @@ export function planChunks({ width, height, limits, chunk = null }) {
 export async function renderChunked(device, scene, raster, {
   s,
   bg,
+  kernel = 'box',
   transparent = false,
   depth = 8,
   chunk = null,
@@ -93,6 +94,7 @@ export async function renderChunked(device, scene, raster, {
       const started = performance.now();
       renderer.uploadScene(scene, {
         s,
+        kernel,
         scale: raster.scale,
         origin: [
           raster.origin[0] + region.x * raster.scale,

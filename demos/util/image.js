@@ -6,6 +6,7 @@ import {
   encode as encodePng,
   encode_pHYs_PPI,
 } from 'png-tools';
+import { resolveKernel } from '../../js/filter-kernels.js';
 import { readBytes } from './runtime.js';
 
 const clampSample = (x, max) => Math.max(0, Math.min(max, Math.round(x * max)));
@@ -133,14 +134,20 @@ function boxKernel(size) {
   return { reach, weights: weights.map((weight) => weight / total) };
 }
 
-// Lazily cache box-blurred copies of a target, bucketing the filter size so
+// Lazily cache blurred copies of a target, bucketing the filter size so
 // an annealing schedule reuses a handful of blurred targets.
-export function blurredTargetProvider(rgba, width, height, quantum = 0.5) {
+export function blurredTargetProvider(rgba, width, height, quantum = 0.5, kernel = 'box') {
   const cache = new Map();
+  const { boxPasses } = resolveKernel(kernel);
+  const blur = (size) => {
+    let output = rgba;
+    for (let pass = 0; pass < boxPasses; pass++) output = boxBlurImage(output, width, height, size);
+    return output;
+  };
   return (size) => {
     const key = Math.round(size / quantum) * quantum;
     if (key <= 1) return rgba;
-    if (!cache.has(key)) cache.set(key, boxBlurImage(rgba, width, height, key));
+    if (!cache.has(key)) cache.set(key, blur(key));
     return cache.get(key);
   };
 }
