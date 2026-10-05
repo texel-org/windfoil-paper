@@ -71,6 +71,9 @@ let live = false;
 let cameraSource = false;
 let videoTime = -1;
 let sourceGeneration = 0;
+// Distinct messages shown in the error line. A broken GPU pipeline fails again
+// on every frame, so repeats are dropped and the first (usually the cause) stays.
+const errors = new Set();
 
 // An integer up to `max`, or the fallback when `value` is not one >= `min`.
 function integerParam(value, min, max, fallback) {
@@ -192,6 +195,7 @@ function restart() {
   updateControls();
   if (!engine.target) return;
   engine.background = backgroundColor();
+  errors.clear();
   errorText.textContent = "";
   engine.reset(true).catch(showError);
 }
@@ -333,8 +337,11 @@ function updateControls() {
 }
 
 function showError(error) {
-  errorText.textContent = error?.message ?? String(error);
   console.error(error);
+  const message = error?.message ?? String(error);
+  if (errors.has(message) || errors.size >= 10) return;
+  errors.add(message);
+  errorText.textContent = [...errors].join("\n");
 }
 
 function bindUi() {
@@ -394,6 +401,12 @@ async function main() {
   presetControls();
   resizeTarget();
   const device = await requestDevice();
+  // GPU validation errors and device loss never throw, so without these they
+  // would only reach the console, which a phone does not show.
+  device.addEventListener("uncapturederror", (event) => showError(event.error));
+  device.lost.then(({ reason, message }) =>
+    showError(`WebGPU device lost (${reason}): ${message}`),
+  );
   preview = new Preview(device, resultCanvas);
   engine = new Engine(device, {
     width: sourceCanvas.width,
@@ -426,6 +439,9 @@ async function main() {
   frameLoop();
   engine.run();
 }
+
+window.addEventListener("error", (event) => showError(event.error ?? event.message));
+window.addEventListener("unhandledrejection", (event) => showError(event.reason));
 
 if (!navigator.gpu)
   showError("WebGPU is unavailable. Use current Chrome on localhost or HTTPS.");
