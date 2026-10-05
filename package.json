@@ -34,7 +34,6 @@
   },
   "dependencies": {
     "@texel/color": "^1.1.11",
-    "fast-png": "8.0.0",
     "fflate": "^0.8.2",
     "jpeg-js": "0.4.4",
     "png-tools": "^1.1.1",

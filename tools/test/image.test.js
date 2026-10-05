@@ -21,8 +21,7 @@ import {
   imageToPng,
   letterboxRgba,
   loadImageSource,
-  rgba16ToPng,
-  rgba8ToPng,
+  rgbaToPng,
 } from '../../demos/util/image.js';
 
 const JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAABAAIDAREAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDs/gx/yR7wn/2LVh/6TpX+Yeef8jvFf9fJ/wDpTP8AMj6UX/KTPG//AGN8y/8AU2sf/9k=';
@@ -98,20 +97,21 @@ test('16-bit transparent blits retain high-precision straight-alpha samples', ()
 });
 
 test('PNG output carries requested print resolution metadata', () => {
-  const png = rgba8ToPng(Uint8Array.of(0, 0, 0, 0), 1, 1, { ppi: 300 });
+  const png = rgbaToPng(Uint8Array.of(0, 0, 0, 0), 1, 1, { ppi: 300 });
+  assert.deepEqual([...decode(png, unzlibSync).data], [0, 0, 0, 0]);
   const chunks = readChunks(png);
   const physical = chunks.find(({ type }) => type === ChunkType.pHYs);
   assert.ok(physical);
   assert.ok(Math.abs(decode_pHYs_PPI(physical.data) - 300) < 0.01);
   assert.throws(
-    () => rgba8ToPng(Uint8Array.of(0, 0, 0, 0), 1, 1, { ppi: 0 }),
+    () => rgbaToPng(Uint8Array.of(0, 0, 0, 0), 1, 1, { ppi: 0 }),
     /positive and finite/,
   );
 });
 
 test('16-bit PNG output preserves samples and print resolution metadata', () => {
   const samples = Uint16Array.of(1, 257, 32768, 65535);
-  const png = rgba16ToPng(samples, 1, 1, { ppi: 300 });
+  const png = rgbaToPng(samples, 1, 1, { depth: 16, ppi: 300 });
   assert.deepEqual(readIHDR(png), {
     width: 1,
     height: 1,

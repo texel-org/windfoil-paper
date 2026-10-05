@@ -1,12 +1,10 @@
-import { decode as decodePng, encode as encodeFastPng } from 'fast-png';
-import { zlibSync } from 'fflate';
+import { unzlibSync, zlibSync } from 'fflate';
 import {
   ChunkType,
   ColorType,
+  decode as decodePng,
   encode as encodePng,
   encode_pHYs_PPI,
-  readChunks,
-  writeChunks,
 } from 'png-tools';
 import { readBytes } from './runtime.js';
 
@@ -20,7 +18,8 @@ export async function loadTarget(path, width, height = width) {
 export async function loadImageSource(path) {
   const bytes = await readBytes(path);
   let source;
-  if (isPng(bytes)) source = decodePng(bytes);
+  // png-tools expands every PNG color type to 8- or 16-bit RGBA.
+  if (isPng(bytes)) source = decodePng(bytes, unzlibSync);
   else if (isJpeg(bytes)) {
     const jpeg = await import('jpeg-js');
     const decoded = (jpeg.decode ?? jpeg.default.decode)(bytes, { useTArray: true, formatAsRGBA: true });
@@ -256,43 +255,21 @@ function spanCoverage(count, start, end) {
   return coverage;
 }
 
-export function rgba8ToPng(data, width, height, { ppi = null } = {}) {
-  const png = encodeFastPng({ width, height, data, channels: 4, depth: 8 });
-  const physical = pngPhysicalChunk(ppi);
-  if (physical === null) return png;
-  const chunks = readChunks(png, { copy: false }).filter(({ type }) => type !== ChunkType.pHYs);
-  chunks.splice(1, 0, physical);
-  return writeChunks(chunks);
-}
-
-export function rgba16ToPng(data, width, height, { ppi = null } = {}) {
-  const physical = pngPhysicalChunk(ppi);
-  return encodePng({
-    width,
-    height,
-    data,
-    depth: 16,
-    colorType: ColorType.RGBA,
-    ancillary: physical === null ? [] : [physical],
-  }, zlibSync);
-}
-
+// Encode 8- or 16-bit RGBA samples, optionally tagged with a print resolution.
 export function rgbaToPng(data, width, height, { depth = 8, ppi = null } = {}) {
-  if (depth === 8) return rgba8ToPng(data, width, height, { ppi });
-  if (depth === 16) return rgba16ToPng(data, width, height, { ppi });
-  throw new Error('PNG depth must be 8 or 16');
-}
-
-function pngPhysicalChunk(ppi) {
-  if (ppi === null) return null;
-  if (!(ppi > 0) || !Number.isFinite(ppi)) throw new Error('PNG PPI must be positive and finite');
-  return { type: ChunkType.pHYs, data: encode_pHYs_PPI(ppi) };
+  if (depth !== 8 && depth !== 16) throw new Error('PNG depth must be 8 or 16');
+  const ancillary = [];
+  if (ppi !== null) {
+    if (!(ppi > 0) || !Number.isFinite(ppi)) throw new Error('PNG PPI must be positive and finite');
+    ancillary.push({ type: ChunkType.pHYs, data: encode_pHYs_PPI(ppi) });
+  }
+  return encodePng({ width, height, data, depth, colorType: ColorType.RGBA, ancillary }, zlibSync);
 }
 
 export function imageToPng(image, width, height) {
   const data = new Uint8Array(width * height * 4);
   blitRgba8(data, width, 0, 0, image, width, width, height);
-  return rgba8ToPng(data, width, height);
+  return rgbaToPng(data, width, height);
 }
 
 export function l2Quality(image, target) {
