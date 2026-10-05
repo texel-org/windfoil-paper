@@ -1,6 +1,6 @@
 # Windfoil
 
-Reference code for the Windfoil preprint.
+Reference code for the [Windfoil preprint](https://arxiv.org/abs/2610.02468).
 
 ## Quick start
 
@@ -13,14 +13,14 @@ npm install && npm run fixtures:farlev && npm run demo:l2
 Outputs go in `output/`. Options are in [docs/flags.md](docs/flags.md);
 image sources and downloads are in [fixtures/README.md](fixtures/README.md).
 
-| Task | Command |
-| --- | --- |
-| Fit an image | `npm run demo:l2 -- --target=photo.png` |
+| Task            | Command                                    |
+| --------------- | ------------------------------------------ |
+| Fit an image    | `npm run demo:l2 -- --target=photo.png`    |
 | Lines / plotter | `npm run demo:lines` / `npm run demo:plot` |
-| SVG roundtrip | `npm run demo:roundtrip` |
-| Rasterize SVG | `npm run render -- --svg=art.svg` |
-| Browser demo | `npm run web:demo` |
-| Tests | `npm test` |
+| SVG roundtrip   | `npm run demo:roundtrip`                   |
+| Rasterize SVG   | `npm run render -- --svg=art.svg`          |
+| Browser demo    | `npm run web:demo`                         |
+| Tests           | `npm test`                                 |
 
 ## Python (optional)
 
@@ -39,5 +39,21 @@ For CLIP, run `npm run clip:server`, then `npm run demo:clip` in another termina
 See [bench/README.md](bench/README.md). Linux requires Vulkan;
 NVIDIA containers need `graphics` driver capability. `llvmpipe` means CPU execution.
 Do not clone recursively; use the submodule command in the benchmark setup.
+
+## Citation
+
+If you use this code in your research, please cite the paper:
+
+```bibtex
+@misc{deslauriers2026windfoil,
+  title         = {Windfoil: Closed-Form Coverage for Real-Time and Differentiable Vector Graphics},
+  author        = {Matt DesLauriers},
+  year          = {2026},
+  eprint        = {2610.02468},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.GR},
+  url           = {https://arxiv.org/abs/2610.02468}
+}
+```
 
 [Apache 2.0](LICENSE) · [Credits](NOTICE) · [Citation](CITATION.cff)
