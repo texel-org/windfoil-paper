@@ -4,6 +4,8 @@ Reference code for the [Windfoil preprint](https://arxiv.org/abs/2610.02468).
 
 Abstract:
 
+> We present Windfoil, a GPU-friendly algorithm that treats rasterisation and differentiable vector graphics as two sides of the same problem by evaluating the box-filtered winding number of quadratic Bézier contours in closed form. We implement this in WebGPU, allowing it to run across a range of environments, including a web browser on a consumer laptop, and apply the system to real-time 2D rendering, high-resolution rasterisation for print media, and a differentiable renderer. We compare our renderer against Skia, a production-grade engine, and Slug, a popular GPU rasterisation algorithm for games and real-time applications, measuring fidelity to a reference box-filtered coverage. Our renderer matches the reference more closely than either, at performance comparable to Slug. We also compare our optimiser against DiffVG and Bézier Splatting, where it reaches equivalent or better reconstruction quality at a fraction of the per-step cost, scaling to tens of thousands of shapes at interactive rates.
+
 ## Live Demo
 
 You can see a web demo of image fitting (L2) here:
