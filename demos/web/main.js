@@ -1,31 +1,46 @@
-import { requestDevice } from '../../js/renderer.js';
-import { buildFitModel, Engine } from '../util/engine.js';
-import { $, boundedInteger, imageSize, integerParam, previewSize } from '../util/dom.js';
+import { requestDevice } from "../../js/renderer.js";
+import { buildFitModel, Engine } from "../util/engine.js";
+import {
+  $,
+  boundedInteger,
+  imageSize,
+  integerParam,
+  previewSize,
+} from "../util/dom.js";
 
-import { Preview } from './preview.js';
-import { download, pngBlob, svgBlob } from './render.js';
+import { Preview } from "./preview.js";
+import { download, pngBlob, svgBlob } from "./render.js";
 
 const params = new URLSearchParams(location.search);
 const MAX_COUNT = 100_000;
-const imageSizes = ['256', '512', '1080', '2048', '4096'];
-let size = imageSizes.includes(params.get('opt-size')) ? params.get('opt-size') : '512';
-let count = integerParam(params, 'n', 1000, MAX_COUNT);
-let seed = integerParam(params, 'seed', 7, 0xffff_ffff, 0);
-const modelLabels = { shape: 'shapes', line: 'lines', capsule: 'capsules' };
-let mode = params.get('mode') in modelLabels ? params.get('mode') : 'shape';
-let opaque = params.get('opacity') === 'opaque';
-let learnBlur = params.get('learn-blur') === 'true';
+const imageSizes = ["256", "512", "1080", "2048", "4096"];
+let size = imageSizes.includes(params.get("opt-size"))
+  ? params.get("opt-size")
+  : "512";
+let count = integerParam(params, "n", 256, MAX_COUNT);
+let seed = integerParam(params, "seed", 7, 0xffff_ffff, 0);
+const modelLabels = { shape: "shapes", line: "lines", capsule: "capsules" };
+let mode = params.get("mode") in modelLabels ? params.get("mode") : "shape";
+let opaque = params.get("opacity") === "opaque";
+let learnBlur = params.get("learn-blur") === "true";
 const paletteCounts = [1, 2, 4, 8, 16, 32];
-const requestedColors = Number(params.get('color-count') ?? 1);
+const requestedColors = Number(params.get("color-count") ?? 1);
 let colorCount = paletteCounts.includes(requestedColors) ? requestedColors : 1;
-const blends = ['src-over', 'add', 'multiply', 'screen'];
-let blend = blends.includes(params.get('blend')) ? params.get('blend') : 'src-over';
-let backgroundMode = ['white', 'black'].includes(params.get('bg')) ? params.get('bg') : 'auto';
+const blends = ["src-over", "add", "multiply", "screen"];
+let blend = blends.includes(params.get("blend"))
+  ? params.get("blend")
+  : "src-over";
+let backgroundMode = ["white", "black"].includes(params.get("bg"))
+  ? params.get("bg")
+  : "auto";
 // The fixture is optional; builds also work before it is downloaded.
-const [defaultImage] = Object.values(import.meta.glob(
-  '../../fixtures/wikimedia/farlev-dip-in-road.jpg',
-  { eager: true, query: '?url', import: 'default' },
-));
+const [defaultImage] = Object.values(
+  import.meta.glob("../../fixtures/wikimedia/farlev-dip-in-road.jpg", {
+    eager: true,
+    query: "?url",
+    import: "default",
+  }),
+);
 let targetMean = [1, 1, 1];
 let background = [1, 1, 1];
 let engine;
@@ -41,19 +56,22 @@ let sourceGeneration = 0;
 let inputImage = null;
 let lastPreview = -Infinity;
 
-const source = $('source');
-const result = $('result');
-const sourceContext = source.getContext('2d');
+const source = $("source");
+const result = $("result");
+const sourceContext = source.getContext("2d");
 let preview;
-const work = document.createElement('canvas');
-const workContext = work.getContext('2d', { willReadFrequently: true });
-const video = $('camera');
+const work = document.createElement("canvas");
+const workContext = work.getContext("2d", { willReadFrequently: true });
+const video = $("camera");
 
 function resizeCanvases(width = 512, height = 288) {
   const dimensions = imageSize(width, height, size);
   source.width = work.width = dimensions.width;
   source.height = work.height = dimensions.height;
-  document.documentElement.style.setProperty('--image-aspect', `${dimensions.width} / ${dimensions.height}`);
+  document.documentElement.style.setProperty(
+    "--image-aspect",
+    `${dimensions.width} / ${dimensions.height}`,
+  );
   target = new Float32Array(work.width * work.height * 4);
   dirty = true;
   if (engine) {
@@ -64,7 +82,7 @@ function resizeCanvases(width = 512, height = 288) {
 
 function drawSource(input, width, height, mirror = false) {
   sourceContext.save();
-  sourceContext.fillStyle = '#fff';
+  sourceContext.fillStyle = "#fff";
   sourceContext.fillRect(0, 0, source.width, source.height);
   if (mirror) {
     sourceContext.translate(source.width, 0);
@@ -76,7 +94,7 @@ function drawSource(input, width, height, mirror = false) {
 
 function captureTarget(input, width, height, mirror = false) {
   workContext.save();
-  workContext.fillStyle = '#fff';
+  workContext.fillStyle = "#fff";
   workContext.fillRect(0, 0, work.width, work.height);
   if (mirror) {
     workContext.translate(work.width, 0);
@@ -84,7 +102,12 @@ function captureTarget(input, width, height, mirror = false) {
   }
   workContext.drawImage(input, 0, 0, work.width, work.height);
   workContext.restore();
-  const targetBytes = workContext.getImageData(0, 0, work.width, work.height).data;
+  const targetBytes = workContext.getImageData(
+    0,
+    0,
+    work.width,
+    work.height,
+  ).data;
   const pixels = work.width * work.height;
   targetMean = [0, 0, 0];
   for (let i = 0; i < pixels; i++) {
@@ -100,10 +123,16 @@ function captureTarget(input, width, height, mirror = false) {
 }
 
 function updateBackground() {
-  const chosen = backgroundMode === 'auto'
-    ? blend === 'src-over' ? 'mean' : blend === 'multiply' ? 'white' : 'black'
-    : backgroundMode;
-  background = chosen === 'mean' ? targetMean : chosen === 'white' ? [1, 1, 1] : [0, 0, 0];
+  const chosen =
+    backgroundMode === "auto"
+      ? blend === "src-over"
+        ? "mean"
+        : blend === "multiply"
+          ? "white"
+          : "black"
+      : backgroundMode;
+  background =
+    chosen === "mean" ? targetMean : chosen === "white" ? [1, 1, 1] : [0, 0, 0];
 }
 
 function resetOptions() {
@@ -111,14 +140,14 @@ function resetOptions() {
   updateBackground();
   engine.blend = blend;
   engine.setTarget(target, background);
-  $('error').textContent = '';
+  $("error").textContent = "";
   engine.reset(true).catch(showError);
 }
 
 async function loadImage(url) {
   const ticket = ++sourceGeneration;
   const image = new Image();
-  image.decoding = 'async';
+  image.decoding = "async";
   image.src = url;
   await image.decode();
   if (ticket !== sourceGeneration) return;
@@ -134,8 +163,8 @@ async function loadImage(url) {
 }
 
 function updateSourceLabel(width, height) {
-  $('source-label').textContent = cameraSource
-    ? `webcam · ${live ? 'live' : 'frozen'} · ${work.width} × ${work.height}`
+  $("source-label").textContent = cameraSource
+    ? `webcam · ${live ? "live" : "frozen"} · ${work.width} × ${work.height}`
     : `${width} × ${height} → ${work.width} × ${work.height}`;
 }
 
@@ -156,38 +185,60 @@ function frameLoop(now = 0) {
   requestAnimationFrame(frameLoop);
   if (live) refreshCamera();
   const box = result.getBoundingClientRect();
-  const dimensions = previewSize(box.width, box.height, window.devicePixelRatio || 1);
-  if (dimensions.width !== result.width || dimensions.height !== result.height) dirty = true;
+  const dimensions = previewSize(
+    box.width,
+    box.height,
+    window.devicePixelRatio || 1,
+  );
+  if (dimensions.width !== result.width || dimensions.height !== result.height)
+    dirty = true;
   if (!dirty || rendering || now - lastPreview < 1000 / 30) return;
   dirty = false;
   lastPreview = now;
-  if (live && video.videoWidth) drawSource(video, video.videoWidth, video.videoHeight, true);
+  if (live && video.videoWidth)
+    drawSource(video, video.videoWidth, video.videoHeight, true);
   const snapshot = engine.snapshot();
   if (snapshot) {
     rendering = true;
     const generation = engine.generation;
-    preview.render(snapshot, dimensions.width, dimensions.height,
-      () => generation === engine.generation && !!engine.target)
+    preview
+      .render(
+        snapshot,
+        dimensions.width,
+        dimensions.height,
+        () => generation === engine.generation && !!engine.target,
+      )
       .then((rendered) => {
-        if (rendered) $('render-size').textContent = `${dimensions.width} × ${dimensions.height}`;
+        if (rendered)
+          $("render-size").textContent =
+            `${dimensions.width} × ${dimensions.height}`;
       })
       .catch(showError)
-      .finally(() => { rendering = false; });
+      .finally(() => {
+        rendering = false;
+      });
   }
-  $('step').textContent = String(engine.step);
-  $('loss').textContent = engine.loss == null ? '–' : engine.loss.toExponential(3);
-  $('psnr').textContent = engine.loss > 0 ? `${(-10 * Math.log10(engine.loss)).toFixed(2)} dB` : '–';
-  $('rate').textContent = engine.averageMs ? `${engine.averageMs.toFixed(1)} ms` : '–';
+  $("step").textContent = String(engine.step);
+  $("loss").textContent =
+    engine.loss == null ? "–" : engine.loss.toExponential(3);
+  $("psnr").textContent =
+    engine.loss > 0 ? `${(-10 * Math.log10(engine.loss)).toFixed(2)} dB` : "–";
+  $("rate").textContent = engine.averageMs
+    ? `${engine.averageMs.toFixed(1)} ms`
+    : "–";
   updateControls();
 }
 
 async function downloadScene(format) {
-  const snapshot = engine.snapshot(format === 'svg');
+  const snapshot = engine.snapshot(format === "svg");
   if (!snapshot || downloading) return;
   downloading = true;
   updateControls();
   try {
-    const blob = format === 'png' ? await pngBlob(engine.device, snapshot) : svgBlob(snapshot);
+    const blob =
+      format === "png"
+        ? await pngBlob(engine.device, snapshot)
+        : svgBlob(snapshot);
     download(blob, `windfoil.${format}`);
   } finally {
     downloading = false;
@@ -198,10 +249,10 @@ async function downloadScene(format) {
 async function startCamera() {
   if (live) {
     // Keep the original frozen frame so changing fit size can resample it.
-    inputImage = document.createElement('canvas');
+    inputImage = document.createElement("canvas");
     inputImage.width = video.videoWidth;
     inputImage.height = video.videoHeight;
-    inputImage.getContext('2d').drawImage(video, 0, 0);
+    inputImage.getContext("2d").drawImage(video, 0, 0);
     captureTarget(video, video.videoWidth, video.videoHeight, true);
     drawSource(video, video.videoWidth, video.videoHeight, true);
     stopCamera();
@@ -210,7 +261,10 @@ async function startCamera() {
     return;
   }
   sourceGeneration++;
-  stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: false,
+  });
   video.srcObject = stream;
   try {
     await video.play();
@@ -251,7 +305,7 @@ async function closeCamera() {
     resizeCanvases();
     sourceContext.clearRect(0, 0, source.width, source.height);
     preview.clear();
-    $('source-label').textContent = 'choose an image';
+    $("source-label").textContent = "choose an image";
     dirty = true;
   }
 }
@@ -273,123 +327,151 @@ function stopCamera() {
 }
 
 function updateControls() {
-  $('play').textContent = engine.playing ? 'pause' : 'play';
-  $('camera-button').textContent = live ? 'freeze camera' : 'webcam';
-  $('close-camera').hidden = !cameraSource;
+  $("play").textContent = engine.playing ? "pause" : "play";
+  $("camera-button").textContent = live ? "freeze camera" : "webcam";
+  $("close-camera").hidden = !cameraSource;
   const ready = !!engine.model && !!engine.target;
-  $('play').disabled = !ready;
-  $('reset').disabled = !ready;
-  $('camera-button').disabled = false;
-  $('download-png').disabled = !ready || downloading;
-  $('download-svg').disabled = !ready || downloading || blend !== 'src-over' || learnBlur;
-  $('download-svg').title = learnBlur ? 'SVG cannot represent Windfoil per-shape blur'
-    : blend === 'src-over' ? '' : 'SVG download requires normal blending';
+  $("play").disabled = !ready;
+  $("reset").disabled = !ready;
+  $("camera-button").disabled = false;
+  $("download-png").disabled = !ready || downloading;
+  $("download-svg").disabled =
+    !ready || downloading || blend !== "src-over" || learnBlur;
+  $("download-svg").title = learnBlur
+    ? "SVG cannot represent Windfoil per-shape blur"
+    : blend === "src-over"
+      ? ""
+      : "SVG download requires normal blending";
 }
 
 function showError(error) {
-  $('error').textContent = error?.message ?? String(error);
+  $("error").textContent = error?.message ?? String(error);
   console.error(error);
 }
 
 function bindUi() {
   for (const input of document.querySelectorAll('input[type="number"]')) {
-    input.addEventListener('wheel', (event) => {
-      if (document.activeElement === input) event.preventDefault();
-    }, { passive: false });
+    input.addEventListener(
+      "wheel",
+      (event) => {
+        if (document.activeElement === input) event.preventDefault();
+      },
+      { passive: false },
+    );
   }
-  $('play').onclick = () => {
+  $("play").onclick = () => {
     engine.playing = !engine.playing;
     updateControls();
   };
-  $('reset').onclick = () => engine.reset(true).catch(showError);
-  $('camera-button').onclick = () => startCamera().catch(showError);
-  $('close-camera').onclick = () => closeCamera().catch(showError);
-  $('download-png').onclick = () => downloadScene('png').catch(showError);
-  $('download-svg').onclick = () => downloadScene('svg').catch(showError);
-  $('count').onchange = () => {
-    count = boundedInteger($('count').value, count, 1, MAX_COUNT);
-    $('count').value = count;
+  $("reset").onclick = () => engine.reset(true).catch(showError);
+  $("camera-button").onclick = () => startCamera().catch(showError);
+  $("close-camera").onclick = () => closeCamera().catch(showError);
+  $("download-png").onclick = () => downloadScene("png").catch(showError);
+  $("download-svg").onclick = () => downloadScene("svg").catch(showError);
+  $("count").onchange = () => {
+    count = boundedInteger($("count").value, count, 1, MAX_COUNT);
+    $("count").value = count;
     resetOptions();
   };
-  $('opt-size').onchange = () => {
-    size = $('opt-size').value;
+  $("opt-size").onchange = () => {
+    size = $("opt-size").value;
     resizeInput().catch(showError);
   };
-  $('mode').onchange = () => {
-    mode = $('mode').value;
-    $('model-label').textContent = modelLabels[mode];
+  $("mode").onchange = () => {
+    mode = $("mode").value;
+    $("model-label").textContent = modelLabels[mode];
     resetOptions();
   };
-  $('color-count').onchange = () => {
-    colorCount = Number($('color-count').value);
+  $("color-count").onchange = () => {
+    colorCount = Number($("color-count").value);
     resetOptions();
   };
-  $('blend').onchange = () => {
-    blend = $('blend').value;
+  $("blend").onchange = () => {
+    blend = $("blend").value;
     resetOptions();
   };
-  $('background').onchange = () => {
-    backgroundMode = $('background').value;
+  $("background").onchange = () => {
+    backgroundMode = $("background").value;
     resetOptions();
   };
-  $('optimise-alpha').onchange = () => {
-    opaque = !$('optimise-alpha').checked;
+  $("optimise-alpha").onchange = () => {
+    opaque = !$("optimise-alpha").checked;
     resetOptions();
   };
-  $('learn-blur').onchange = () => {
-    learnBlur = $('learn-blur').checked;
+  $("learn-blur").onchange = () => {
+    learnBlur = $("learn-blur").checked;
     resetOptions();
   };
-  $('file').onchange = ({ target: input }) => {
+  $("file").onchange = ({ target: input }) => {
     const file = input.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
-    loadImage(url).catch(showError).finally(() => URL.revokeObjectURL(url));
-    input.value = '';
+    loadImage(url)
+      .catch(showError)
+      .finally(() => URL.revokeObjectURL(url));
+    input.value = "";
   };
-  const drop = $('drop');
-  drop.onclick = () => $('file').click();
+  const drop = $("drop");
+  drop.onclick = () => $("file").click();
   window.ondragover = (event) => event.preventDefault();
   window.ondrop = (event) => {
     event.preventDefault();
-    const file = [...event.dataTransfer.files].find((item) => item.type.startsWith('image/'));
+    const file = [...event.dataTransfer.files].find((item) =>
+      item.type.startsWith("image/"),
+    );
     if (!file) return;
     const url = URL.createObjectURL(file);
-    loadImage(url).catch(showError).finally(() => URL.revokeObjectURL(url));
+    loadImage(url)
+      .catch(showError)
+      .finally(() => URL.revokeObjectURL(url));
   };
 }
 
 async function main() {
   resizeCanvases();
-  $('count').value = count;
-  $('opt-size').value = size;
-  $('mode').value = mode;
-  $('color-count').value = colorCount;
-  $('blend').value = blend;
-  $('background').value = backgroundMode;
-  $('optimise-alpha').checked = !opaque;
-  $('learn-blur').checked = learnBlur;
-  $('model-label').textContent = modelLabels[mode];
+  $("count").value = count;
+  $("opt-size").value = size;
+  $("mode").value = mode;
+  $("color-count").value = colorCount;
+  $("blend").value = blend;
+  $("background").value = backgroundMode;
+  $("optimise-alpha").checked = !opaque;
+  $("learn-blur").checked = learnBlur;
+  $("model-label").textContent = modelLabels[mode];
   bindUi();
   const device = await requestDevice();
   preview = new Preview(device, result);
   engine = new Engine(device, {
-    width: work.width, height: work.height, blend,
-    build: () => buildFitModel({
-      mode, n: count, width: engine.width, height: engine.height,
-      seed: seed++, target: engine.target, background: engine.background,
-      colorCount, opaque, learnBlur, lrScale: blend === 'src-over' ? 1 : 0.25,
-    }),
+    width: work.width,
+    height: work.height,
+    blend,
+    build: () =>
+      buildFitModel({
+        mode,
+        n: count,
+        width: engine.width,
+        height: engine.height,
+        seed: seed++,
+        target: engine.target,
+        background: engine.background,
+        colorCount,
+        opaque,
+        learnBlur,
+        lrScale: blend === "src-over" ? 1 : 0.25,
+      }),
     settings: () => ({ s: [1, 1], bg: engine.background }),
-    onFrame: () => { dirty = true; },
+    onFrame: () => {
+      dirty = true;
+    },
     onError: showError,
   });
   updateControls();
   if (defaultImage) await loadImage(defaultImage);
-  else $('source-label').textContent = 'choose an image';
+  else $("source-label").textContent = "choose an image";
   frameLoop();
   engine.run();
 }
 
-if (!navigator.gpu) showError('WebGPU is unavailable. Use current Chrome on localhost or HTTPS.');
+if (!navigator.gpu)
+  showError("WebGPU is unavailable. Use current Chrome on localhost or HTTPS.");
 else main().catch(showError);

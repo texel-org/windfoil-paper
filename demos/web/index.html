@@ -1,81 +1,112 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Windfoil - Image Fitting Demo</title>
-    <link rel="stylesheet" href="./style.css">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Windfoil</title>
+    <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <header>
-      <h1>Windfoil - Image Fitting Demo</h1>
-      <p><a href="https://arxiv.org/abs/2610.02468">Paper</a> · <a href="https://github.com/texel-org/windfoil-paper">GitHub</a></p>
+      <h1>Windfoil</h1>
+      <caption>
+        Closed-Form Coverage for Real-Time and Differentiable Vector Graphics,
+        by
+        <a href="https://mattdesl.com/">Matt DesLauriers</a>
+      </caption>
+      <p>
+        <a href="https://arxiv.org/abs/2610.02468">Preprint</a> ·
+        <a href="https://github.com/texel-org/windfoil-paper">GitHub</a>
+      </p>
     </header>
 
     <nav aria-label="Demo controls">
       <div class="parameters">
-      <label>model
-        <select id="mode">
-          <option value="shape">shapes</option>
-          <option value="line">lines</option>
-          <option value="capsule">capsules</option>
-        </select>
-      </label>
-      <label>count <input id="count" type="number" min="1" max="100000"></label>
-      <label>image opt size
-        <select id="opt-size" title="Caps the longest side. Smaller images are not enlarged.">
-          <option value="256">256</option>
-          <option value="512" selected>512</option>
-          <option value="1080">1080</option>
-          <option value="2048">2048</option>
-          <option value="4096">4096</option>
-        </select>
-      </label>
-      <label>colors
-        <select id="color-count" title="Learn a shared palette; translucent marks can blend its colors.">
-          <option value="1">unlimited</option>
-          <option value="2">2</option>
-          <option value="4">4</option>
-          <option value="8">8</option>
-          <option value="16">16</option>
-          <option value="32">32</option>
-        </select>
-      </label>
-      <label>blend
-        <select id="blend">
-          <option value="src-over">normal</option>
-          <option value="add">add</option>
-          <option value="multiply">multiply</option>
-          <option value="screen">screen</option>
-        </select>
-      </label>
-      <label>background
-        <select id="background">
-          <option value="auto">auto</option>
-          <option value="white">white</option>
-          <option value="black">black</option>
-        </select>
-      </label>
-      <label class="toggle"><input id="optimise-alpha" type="checkbox" checked>optimise alpha</label>
-      <label class="toggle"><input id="learn-blur" type="checkbox">per shape blur</label>
+        <label
+          >model
+          <select id="mode">
+            <option value="shape">shapes</option>
+            <option value="line">lines</option>
+            <option value="capsule">capsules</option>
+          </select>
+        </label>
+        <label
+          >count <input id="count" type="number" min="1" max="100000"
+        /></label>
+        <label
+          >image opt size
+          <select
+            id="opt-size"
+            title="Caps the longest side. Smaller images are not enlarged."
+          >
+            <option value="256">256</option>
+            <option value="512" selected>512</option>
+            <option value="1080">1080</option>
+            <option value="2048">2048</option>
+            <option value="4096">4096</option>
+          </select>
+        </label>
+        <label
+          >colors
+          <select
+            id="color-count"
+            title="Learn a shared palette; translucent marks can blend its colors."
+          >
+            <option value="1">unlimited</option>
+            <option value="2">2</option>
+            <option value="4">4</option>
+            <option value="8">8</option>
+            <option value="16">16</option>
+            <option value="32">32</option>
+          </select>
+        </label>
+        <label
+          >blend
+          <select id="blend">
+            <option value="src-over">normal</option>
+            <option value="add">add</option>
+            <option value="multiply">multiply</option>
+            <option value="screen">screen</option>
+          </select>
+        </label>
+        <label
+          >background
+          <select id="background">
+            <option value="auto">auto</option>
+            <option value="white">white</option>
+            <option value="black">black</option>
+          </select>
+        </label>
+        <label class="toggle"
+          ><input id="optimise-alpha" type="checkbox" checked />optimise
+          alpha</label
+        >
+        <label class="toggle"
+          ><input id="learn-blur" type="checkbox" />per shape blur</label
+        >
       </div>
       <div class="actions">
-      <button id="play" disabled>pause</button>
-      <button id="reset" disabled>reset</button>
-      <button id="camera-button" disabled>webcam</button>
-      <button id="close-camera" hidden>close camera</button>
-      <button id="download-png" disabled>Download PNG</button>
-      <button id="download-svg" disabled>Download SVG</button>
+        <button id="play" disabled>pause</button>
+        <button id="reset" disabled>reset</button>
+        <button id="camera-button" disabled>webcam</button>
+        <button id="close-camera" hidden>close camera</button>
+        <button id="download-png" disabled>Download PNG</button>
+        <button id="download-svg" disabled>Download SVG</button>
       </div>
     </nav>
 
     <main>
       <section>
-        <div class="caption"><b>target</b><span id="source-label">loading</span></div>
+        <div class="caption">
+          <b>target</b><span id="source-label">loading</span>
+        </div>
         <div id="drop" class="canvas"><canvas id="source"></canvas></div>
       </section>
       <section>
-        <div class="caption"><b id="model-label">quadratic loops</b><span>rendered by Windfoil · <span id="render-size"></span></span></div>
+        <div class="caption">
+          <b id="model-label">quadratic loops</b
+          ><span>rendered by Windfoil · <span id="render-size"></span></span>
+        </div>
         <div class="canvas"><canvas id="result"></canvas></div>
       </section>
     </main>
@@ -88,7 +119,7 @@
     </aside>
     <p class="hint">Drop or click the target to choose an image.</p>
     <pre id="error"></pre>
-    <input id="file" type="file" accept="image/*" hidden>
+    <input id="file" type="file" accept="image/*" hidden />
     <video id="camera" playsinline muted></video>
     <script type="module" src="./main.js"></script>
   </body>
