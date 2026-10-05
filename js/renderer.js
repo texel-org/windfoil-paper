@@ -157,10 +157,15 @@ async function readSource(url) {
   return fetch(url).then((r) => r.text());
 }
 
-/** Concatenate the WGSL modules into one shader and fail on compile errors. */
-async function createShaderModule(device, urls) {
+/** Concatenate the WGSL modules into one shader source. */
+async function loadWgsl(urls) {
   const parts = await Promise.all(urls.map((url) => readSource(url)));
-  const module = device.createShaderModule({ code: parts.join('\n') });
+  return parts.join('\n');
+}
+
+/** Compile a shader and fail on compile errors. */
+async function createShaderModule(device, code) {
+  const module = device.createShaderModule({ code });
   const info = await module.getCompilationInfo();
   const errors = info.messages.filter((m) => m.type === 'error');
   if (errors.length) {
@@ -185,6 +190,9 @@ const TILE = 16;  // pixels per tile side; MUST match TILE in scene.wgsl
 const SCAN_WG = 256; // tile-offset scan workgroup; MUST match SCAN_WG in binning.wgsl
 const SORT_CAPACITY_MIN = 2048;   // fits WebGPU's guaranteed 16 KiB of workgroup storage
 const SORT_CAPACITY_MAX = 16384;  // beyond this the sort is no longer the bottleneck
+// bin_sort's capacity is a WGSL const, so each other capacity compiles its own
+// module with this declaration rewritten.
+const SORT_CAPACITY_DECLARATION = `const SORT_CAPACITY : u32 = ${SORT_CAPACITY_MIN}u;`;
 
 // Entries bin_sort can hold in workgroup memory. Above it a tile falls back to a
 // serial comb sort, which is ~100x slower, so use whatever the device allows.
@@ -455,7 +463,11 @@ export class Renderer {
 
   async #init() {
     const d = this.device;
-    const module = await createShaderModule(d, WGSL_SOURCES);
+    this.wgsl = await loadWgsl(WGSL_SOURCES);
+    if (!this.wgsl.includes(SORT_CAPACITY_DECLARATION)) {
+      throw new Error(`binning.wgsl must declare ${SORT_CAPACITY_DECLARATION}`);
+    }
+    const module = await createShaderModule(d, this.wgsl);
     this.module = module; // retained for lazily specialized pipelines
 
     const mk = (size, usage) => d.createBuffer({ size, usage });
@@ -591,13 +603,14 @@ export class Renderer {
   #sortPipeline(capacity) {
     let pipe = this._sortPipes.get(capacity);
     if (!pipe) {
+      const module = capacity === SORT_CAPACITY_MIN
+        ? this.module
+        : this.device.createShaderModule({
+            code: this.wgsl.replace(SORT_CAPACITY_DECLARATION, `const SORT_CAPACITY : u32 = ${capacity}u;`),
+          });
       pipe = this.device.createComputePipeline({
         layout: 'auto',
-        compute: {
-          module: this.module,
-          entryPoint: 'bin_sort',
-          constants: { SORT_CAPACITY: capacity },
-        },
+        compute: { module, entryPoint: 'bin_sort' },
       });
       this._sortPipes.set(capacity, pipe);
     }

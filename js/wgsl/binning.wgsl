@@ -141,11 +141,12 @@ fn bin_fill(@builtin(global_invocation_id) gid : vec3<u32>) {
 // Restore painter order, one workgroup per tile: a 2k-entry workgroup bitonic
 // sort for typical tiles, with an exact comb-sort fallback for larger ones.
 // Shared-memory capacity for the parallel sort, in entries. The default fits
-// WebGPU's guaranteed 16 KiB of workgroup storage; the host raises it to what
-// the device actually offers, which moves the point where a tile falls back to
-// the serial path. Must be a power of two: the bitonic network sorts a
-// power-of-two span.
-override SORT_CAPACITY : u32 = 2048u;
+// WebGPU's guaranteed 16 KiB of workgroup storage; the host compiles variants
+// with this line rewritten to what the device offers, which moves the point
+// where a tile falls back to the serial path. A const, not an override: Safari
+// fails to build pipelines whose workgroup array is sized by an override. Must
+// be a power of two: the bitonic network sorts a power-of-two span.
+const SORT_CAPACITY : u32 = 2048u;
 const SORT_WG : u32 = 256u;
 
 var<workgroup> sortScratch : array<u32, SORT_CAPACITY>;
