@@ -33,9 +33,10 @@ let blend = blends.includes(params.get("blend"))
 let backgroundMode = ["white", "black"].includes(params.get("bg"))
   ? params.get("bg")
   : "auto";
-// The fixture is optional; builds also work before it is downloaded.
+// A 4096 px copy of the Färlev fixture, made by tools/web-image.js. The fixture
+// is optional; builds also work before it is downloaded.
 const [defaultImage] = Object.values(
-  import.meta.glob("../../fixtures/wikimedia/farlev-dip-in-road.jpg", {
+  import.meta.glob("../../fixtures/wikimedia/farlev-dip-in-road-4096.jpg", {
     eager: true,
     query: "?url",
     import: "default",

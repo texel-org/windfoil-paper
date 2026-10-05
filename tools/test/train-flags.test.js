@@ -1,7 +1,11 @@
-// Freezing a parameter group must not perturb the groups still trained: a
-// frozen-geometry run has to produce shapeGrads *identical* to a full run, not
-// merely close, because the shared fixed-point path (setFixedScale, SLOTS, the
-// slot reduction) is where a difference could silently creep in.
+// Freezing a parameter group must not perturb the groups still trained. The
+// fixed-point accumulation is exact, so curve gradients and the loss must come
+// back bit-identical to a full run. Shape gradients get a tolerance: each
+// specialization compiles separately, and once a frozen group's code is dead
+// the compiler may fuse or reorder the per-pixel f32 math differently, moving a
+// rare pixel across a rounding step (seen on Metal under macOS 13, a few ulps).
+// The bound sits far below what a fault in the shared fixed-point path
+// (setFixedScale, SLOTS, the slot reduction) would produce.
 //
 // Needs a real adapter, so it skips where WebGPU is unavailable.
 
@@ -14,6 +18,8 @@ import { Renderer, requestDevice } from '../../js/renderer.js';
 const WIDTH = 96;
 const HEIGHT = 72;
 const N = 40;
+// Relative to the largest full-run shape gradient.
+const SHAPE_GRAD_TOLERANCE = 1e-6;
 
 function scene() {
   let seed = 7;
@@ -91,9 +97,10 @@ try {
   available = false;
 }
 
-test('frozen parameter groups leave the trained ones bit-identical', { skip: !available }, async () => {
+test('frozen parameter groups leave the trained ones unchanged', { skip: !available }, async () => {
   const full = await step(undefined);
   assert.deepEqual(full.frozen, []);
+  const shapeTolerance = SHAPE_GRAD_TOLERANCE * Math.max(...full.shapeGrads.map(Math.abs));
 
   for (const geometry of [true, false]) {
     for (const colour of [true, false]) {
@@ -119,8 +126,12 @@ test('frozen parameter groups leave the trained ones bit-identical', { skip: !av
           assert.equal(got.shapeGrads.length, N * 4, `shape stride changed: ${label}`);
           for (let i = 0; i < got.shapeGrads.length; i++) {
             const trained = (i % 4 === 3) ? alpha : colour;
-            const expected = trained ? full.shapeGrads[i] : 0;
-            assert.equal(got.shapeGrads[i], expected, `shape grad ${i} drift: ${label}`);
+            if (trained) {
+              const drift = Math.abs(got.shapeGrads[i] - full.shapeGrads[i]);
+              assert.ok(drift <= shapeTolerance, `shape grad ${i} drift ${drift}: ${label}`);
+            } else {
+              assert.equal(got.shapeGrads[i], 0, `frozen shape grad ${i} nonzero: ${label}`);
+            }
           }
         } else {
           assert.equal(got.shapeGrads, undefined, `shape grads present: ${label}`);

@@ -3,6 +3,18 @@ name: Web demo
 on:
   push:
     branches: [main]
+    # Only what the demo bundle imports (plus its image and build setup), so
+    # README and bench edits don't redeploy an unchanged demo.
+    paths:
+      - demos/web/**
+      - demos/util/**
+      - demos/lines/**
+      - js/**
+      - tools/web-image.js
+      - fixtures/manifests/farlev-highres.json
+      - package.json
+      - package-lock.json
+      - .github/workflows/pages.yml
   workflow_dispatch:
 
 permissions:
@@ -28,10 +40,11 @@ jobs:
           cache: npm
       - run: npm ci
       # The default target image is fetched, not tracked; cache it so each
-      # deploy doesn't re-download 14 MB from Wikimedia.
+      # deploy doesn't re-download 14 MB from Wikimedia. web:build derives the
+      # 4096 px copy the page actually ships.
       - uses: actions/cache@v6
         with:
-          path: fixtures/wikimedia
+          path: fixtures/wikimedia/farlev-dip-in-road.jpg
           key: fixtures-${{ hashFiles('fixtures/manifests/farlev-highres.json') }}
       - run: npm run fixtures:farlev
       - run: npm run web:build
