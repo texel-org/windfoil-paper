@@ -296,18 +296,13 @@ function commandFor({ environment, variant, loss, n, seed, budget, init, cell })
 
   const windfoilCli = resolve(String(arg(options, 'windfoil-cli', 'demos/cli.js')));
   const windfoilSize = loss === 'l2' ? 'max' : String(width);
-  // Pin the blur floor at one pixel. withBlurDefaults() scales it by
-  // max(w,h)/512 when --blur-floor is absent, which sets a 4 px minimum filter
-  // width at 2048px and 8 px at 4096px -- a floor on the sharpest edge the
-  // model can render, and so a ceiling on its PSNR. Scaling the *anneal start*
-  // with the canvas is defensible coarse-to-fine; scaling the floor is not: it
-  // would make every cell above 512px a comparison against a handicapped
-  // renderer. At or below 512px the scale is 1, so this is a no-op.
+  // Both filter widths are explicit so the protocol does not depend on CLI
+  // defaults. The final width stays at one pixel at every resolution.
   const windfoilArgs = [
     windfoilCli, loss, ...common,
     '--opt-size', windfoilSize,
-    '--blur', variant === 'crisp' ? '1' : '7',
-    '--blur-floor', '1',
+    '--blur', '1',
+    '--blur-start', variant === 'crisp' ? '1' : '7',
     // sigmoid rather than identity keeps every decode displayable, which is the
     // guarantee the anchor codec gives by construction and the reason the OKLab
     // codec it replaced was removed. It matches DiffVG's clamp to [0,1] without

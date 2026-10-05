@@ -21,6 +21,7 @@ export function windfoilCommand(environment, args) {
   return {
     command,
     args: [...host.prefix, ...args],
-    env: { ...process.env, WF_WEBGPU_BACKEND: host.backend },
+    // js/renderer.js reads WF_RUNTIME under Deno to pick wgpu or Dawn.
+    env: { ...process.env, WF_RUNTIME: environment },
   };
 }

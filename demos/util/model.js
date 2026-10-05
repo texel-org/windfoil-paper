@@ -232,7 +232,6 @@ export function sceneSvg(_built, { shapes, width, height, pad = 0, background })
 // and clip demos share, and the only model that accepts a shared --init.
 export const shapeCli = {
   defaults: { n: 512, steps: 500, size: 512 },
-  blurFloor: 1,
   bandLimited: false,
   supportsInit: true,
   parse(options) {
@@ -245,8 +244,8 @@ export const shapeCli = {
       fidelity: paletteFidelity(options),
       ...(palette ? { palette } : {}),
       ...(raw ? { raw } : {}),
-      // --learn-blur trains a per-loop filter size (starts at --blur,
-      // floored at --blur-floor) instead of following the global anneal.
+      // --learn-blur trains a per-loop filter size (starts at --blur-start,
+      // never below --blur) instead of following the global anneal.
       learnBlur: 'learn-blur' in options,
     };
   },
@@ -282,8 +281,8 @@ export const shapeCli = {
     initial.raw = config.raw;
     initial.seed = config.seed;
     initial.learnBlur = config.learnBlur;
-    initial.blurInit = config.blur;
-    initial.blurFloor = config.blurFloor;
+    initial.blurInit = config.blurStart;
+    initial.blurFloor = config.blur;
     const { model, lrs } = buildModel(initial);
     return { model, lrs, built: constrainedBuilt(model, config) };
   },
@@ -294,10 +293,11 @@ export const shapeCli = {
   },
 };
 
-export function annealSettings(step, steps, background, blur0 = 7, blurFloor = 1) {
+// Coarse-to-fine filter schedule: the box-filter width eases from `start` to
+// `floor` pixels over the first BLUR_ANNEAL_FRACTION of `steps`, then holds.
+export function annealedBlur(step, steps, start, floor) {
   const t = Math.min(step / Math.max(1, steps * BLUR_ANNEAL_FRACTION), 1);
-  const s = blurFloor + (blur0 - blurFloor) * (1 - t) ** 2;
-  return { s: [s, s], scale: 1, origin: [0, 0], bg: background };
+  return floor + (start - floor) * (1 - t) ** 2;
 }
 
 export function serializeInit(initial) {

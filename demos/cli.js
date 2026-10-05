@@ -15,7 +15,6 @@ const PLOTTER = { line: 'plot', point: 'plot' };
 const commands = {
   l2: { loss: 'l2', primitive: 'shape', models: RASTER },
   clip: { loss: 'clip', primitive: 'shape', models: RASTER },
-  lines: { loss: 'l2', primitive: 'capsule', models: RASTER },
   plot: { loss: 'l2', primitive: 'line', models: PLOTTER },
 };
 const LOSS_KINDS = ['l2', 'clip'];
@@ -26,7 +25,7 @@ await runMain(async ([command, ...options]) => {
     throw new Error(`usage: demos/cli.js <${Object.keys(commands).join('|')}> [options]`);
   }
   // Loss, geometry, and command defaults are orthogonal: --loss fits the model
-  // to any objective (`lines --loss=clip`) and --primitive fits any of the
+  // to any objective (`plot --loss=clip`) and --primitive fits any of the
   // command's geometries under that objective (`clip --primitive=capsule`).
   const parsed = parseArgs(options);
   const loss = 'loss' in parsed ? String(arg(parsed, 'loss')) : selected.loss;

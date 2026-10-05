@@ -4,7 +4,7 @@ import { getWebGPUHostInfo, Renderer, requestDevice } from '../../js/renderer.js
 import { parseFillSvg, rasterSize } from '../render/svg.js';
 import { rgbToHex } from '../util/color.js';
 import { imageToPng, l2Quality } from '../util/image.js';
-import { annealSettings } from '../util/model.js';
+import { annealedBlur } from '../util/model.js';
 import { runPath } from '../util/output.js';
 import { formatLoss, mkdir, readText, runMain, writeBytes, writeText } from '../util/runtime.js';
 import { sceneToSVG } from '../util/svg.js';
@@ -14,12 +14,12 @@ export const ROUNDTRIP_DEFAULTS = Object.freeze({
   svg: 'demos/roundtrip/star-evenodd.svg',
   optSize: 512,
   steps: 100,
-  blur: 7,
+  blur: 1,
   offset: null,
 });
 
 const OPTION_NAMES = new Set([
-  'svg', 'opt-size', 'steps', 'blur', 'offset', 'save-every', 'out', 'quiet',
+  'svg', 'opt-size', 'steps', 'blur', 'blur-start', 'offset', 'save-every', 'out', 'quiet',
 ]);
 
 function positiveInteger(value, name) {
@@ -69,7 +69,6 @@ export function parseRoundtripArgs(argv) {
     const equals = token.indexOf('=');
     const name = token.slice(2, equals < 0 ? undefined : equals);
     if (!OPTION_NAMES.has(name)) throw new Error(`unknown option --${name}`);
-    if (raw.has(name)) throw new Error(`duplicate option --${name}`);
     if (name === 'quiet') {
       if (equals >= 0) throw new Error('--quiet does not take a value');
       raw.set(name, true);
@@ -82,6 +81,16 @@ export function parseRoundtripArgs(argv) {
     raw.set(name, requiredString(value, name));
   }
 
+  // The same filter flags as the other demos: --blur throughout, or a wider
+  // --blur-start that eases down to it.
+  const blur = raw.has('blur')
+    ? positiveNumber(raw.get('blur'), 'blur')
+    : ROUNDTRIP_DEFAULTS.blur;
+  const blurStart = raw.has('blur-start')
+    ? positiveNumber(raw.get('blur-start'), 'blur-start')
+    : blur;
+  if (blurStart < blur) throw new Error('--blur-start must be at least --blur');
+
   return {
     svg: raw.has('svg') ? raw.get('svg') : ROUNDTRIP_DEFAULTS.svg,
     optSize: raw.has('opt-size')
@@ -90,9 +99,8 @@ export function parseRoundtripArgs(argv) {
     steps: raw.has('steps')
       ? positiveInteger(raw.get('steps'), 'steps')
       : ROUNDTRIP_DEFAULTS.steps,
-    blur: raw.has('blur')
-      ? positiveNumber(raw.get('blur'), 'blur')
-      : ROUNDTRIP_DEFAULTS.blur,
+    blur,
+    blurStart,
     offset: raw.has('offset') ? parseOffset(raw.get('offset')) : ROUNDTRIP_DEFAULTS.offset,
     saveEvery: raw.has('save-every')
       ? positiveInteger(raw.get('save-every'), 'save-every')
@@ -128,14 +136,6 @@ export function roundtripRenderSettings(raster, background, blurPixels = 1) {
     scale: raster.scale,
     origin: Array.from(raster.origin),
     bg: Array.from(background),
-  };
-}
-
-export function roundtripAnnealSettings(step, steps, raster, background, blur) {
-  const current = annealSettings(step, steps, background, blur);
-  return {
-    ...roundtripRenderSettings(raster, background, 1),
-    s: [current.s[0] * raster.scale, current.s[1] * raster.scale],
   };
 }
 
@@ -205,12 +205,10 @@ export async function runRoundtrip(argv) {
     const initialQuality = l2Quality(initialRender.image, targetRender.image);
 
     const logEvery = Math.max(1, Math.floor(options.steps / 10));
-    const settings = (step) => roundtripAnnealSettings(
-      step,
-      options.steps,
+    const settings = (step) => roundtripRenderSettings(
       raster,
       background,
-      options.blur,
+      annealedBlur(step, options.steps, options.blurStart, options.blur),
     );
     const onStep = options.quiet && !options.saveEvery ? null : async ({ step, loss }) => {
       if (!options.quiet && (step === 1 || step % logEvery === 0)) {
@@ -262,6 +260,7 @@ export async function runRoundtrip(argv) {
       curves: targetScene.curveCount,
       steps: options.steps,
       blur: options.blur,
+      blurStart: options.blurStart,
       offset,
       saveEvery: options.saveEvery,
       fixedStyle: true,

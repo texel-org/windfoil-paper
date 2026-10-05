@@ -10,7 +10,7 @@ import { LoopModel } from '../../js/loop-model.js';
 import { buildLineModel, lineCli } from '../../demos/lines/model.js';
 import { buildPlotModel, plotCli } from '../../demos/plot/model.js';
 import { buildRoundtripModel } from '../../demos/roundtrip/model.js';
-import { annealSettings, buildModel, createInit, shapeCli } from '../../demos/util/model.js';
+import { annealedBlur, buildModel, createInit, shapeCli } from '../../demos/util/model.js';
 
 test('LoopModel pullback matches finite differences', () => {
   const style = anchorStyle();
@@ -349,7 +349,6 @@ test('model descriptors expose a consistent CLI contract', () => {
   assert.deepEqual(shapeCli.defaults, { n: 512, steps: 500, size: 512 });
   assert.equal(shapeCli.primitive(null), 'quadratic-loop');
   assert.equal(shapeCli.supportsInit, true);
-  assert.equal(shapeCli.blurFloor, 1);
   assert.deepEqual(shapeCli.parse({ k: '5' }), { k: 5, colorCount: 1, opaque: false, fidelity: 0, learnBlur: false });
   assert.deepEqual(
     shapeCli.parse({ 'color-count': '4', opaque: true, 'palette-fidelity': '2' }),
@@ -364,7 +363,6 @@ test('model descriptors expose a consistent CLI contract', () => {
   assert.equal(lineCli.parse({ 'learn-blur': true }).learnBlur, true);
 
   assert.deepEqual(plotCli.defaults, { n: 4000, steps: 800, size: 512 });
-  assert.equal(plotCli.blurFloor, 2);
   assert.equal(plotCli.bandLimited, true);
   assert.equal(plotCli.supportsInit, false);
   // Plot flag defaults: line mode, single black pen (no --colors).
@@ -409,12 +407,37 @@ test('plot prepareTarget honours the colors / grayscale rule', () => {
 });
 
 test('anneal schedule can settle on a blur floor', () => {
-  const background = [1, 1, 1];
-  assert.deepEqual(annealSettings(0, 100, background, 7, 2).s, [7, 7]);
-  assert.deepEqual(annealSettings(55, 100, background, 7, 2).s, [2, 2]);
-  assert.deepEqual(annealSettings(100, 100, background, 7, 2).s, [2, 2]);
-  // The default floor keeps the historical fully-crisp schedule.
-  assert.deepEqual(annealSettings(55, 100, background, 7).s, [1, 1]);
+  assert.equal(annealedBlur(0, 100, 7, 2), 7);
+  assert.equal(annealedBlur(55, 100, 7, 2), 2);
+  assert.equal(annealedBlur(100, 100, 7, 2), 2);
+  assert.equal(annealedBlur(55, 100, 7, 1), 1);
+  assert.equal(annealedBlur(0, 100, 1, 1), 1);
+});
+
+test('bounded learned blur stays within its range and has the correct gradient', () => {
+  const options = {
+    n: 1, width: 64, height: 32, seed: 7,
+    learnBlur: true, blurInit: 7, blurFloor: 1, blurCeiling: 32,
+  };
+  const models = [
+    buildModel({ ...createInit(options), ...options }).model,
+    buildLineModel({ ...options, primitive: 'capsule' }).model,
+  ];
+  for (const model of models) {
+    const widthAt = (parameter) => {
+      model.params.blur[0] = parameter;
+      return model.decode().shapes[0].s;
+    };
+    for (const parameter of [-1000, -1, 0, 1, 1000]) {
+      const width = widthAt(parameter);
+      assert.ok(width >= 1 && width <= 32);
+      // The x and y filter gradients both flow into the one shared width.
+      const analytic = model.pullback({ blurGrads: Float32Array.of(1, 2) }).blur[0];
+      const h = 0.001;
+      const numeric = (widthAt(parameter + h) - widthAt(parameter - h)) / (2 * h);
+      assert.ok(Math.abs(analytic - 3 * numeric) < 0.002);
+    }
+  }
 });
 
 test('roundtrip model preserves ragged topology, styles, rules, and shared joins', () => {

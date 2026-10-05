@@ -59,6 +59,8 @@ export const LOSSES = {
   clip: {
     subjectKey: 'prompt',
     subjectDefault: 'a hot air balloon festival',
+    // CLIP sees 224 px views, so optimize at that size unless --opt-size says otherwise.
+    defaultSize: 224,
     splitSubjects: false,
     loadsTarget: false,
     parse(options) {

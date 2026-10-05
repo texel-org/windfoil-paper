@@ -244,9 +244,8 @@ function argmaxAssign(assign, i, count, stride) {
 // plotter-ready SVG, so the shared runner needs no plot-specific branches.
 export const plotCli = {
   defaults: { n: 4000, steps: 800, size: 512 },
-  // A fixed pen expresses tone only as mark density, so the loss stays band-
-  // limited: the anneal settles on a blur floor rather than sharpening fully.
-  blurFloor: 2,
+  // A fixed pen expresses tone only as mark density, so with --blur above 1
+  // the target is box-filtered like the render and never fully sharpens.
   bandLimited: true,
   supportsInit: false,
   parse(options) {

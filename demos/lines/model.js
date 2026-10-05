@@ -128,7 +128,6 @@ export function buildLineModel({
 // CLI descriptor for the JavaScript-only stroke/point model family.
 export const lineCli = {
   defaults: { n: 512, steps: 500, size: 512 },
-  blurFloor: 1,
   bandLimited: false,
   supportsInit: false,
   parse(options) {
@@ -148,8 +147,8 @@ export const lineCli = {
       fidelity: paletteFidelity(options),
       ...(palette ? { palette } : {}),
       ...(raw ? { raw } : {}),
-      // --learn-blur trains a per-stroke filter size (starts at --blur,
-      // floored at --blur-floor) instead of following the global anneal.
+      // --learn-blur trains a per-stroke filter size (starts at --blur-start,
+      // never below --blur) instead of following the global anneal.
       learnBlur: 'learn-blur' in options,
     };
   },
@@ -169,8 +168,8 @@ export const lineCli = {
       fidelity: config.fidelity,
       raw: config.raw,
       learnBlur: config.learnBlur,
-      blurInit: config.blur,
-      blurFloor: config.blurFloor,
+      blurInit: config.blurStart,
+      blurFloor: config.blur,
     });
     return {
       model,

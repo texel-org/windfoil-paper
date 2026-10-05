@@ -1,38 +1,48 @@
 import { requestDevice } from "../../js/renderer.js";
 import { buildFitModel, Engine } from "../util/engine.js";
-import {
-  $,
-  boundedInteger,
-  imageSize,
-  integerParam,
-  previewSize,
-} from "../util/dom.js";
 
 import { Preview } from "./preview.js";
 import { download, pngBlob, svgBlob } from "./render.js";
 
-const params = new URLSearchParams(location.search);
+const sourceCanvas = document.querySelector("#source");
+const resultCanvas = document.querySelector("#result");
+const video = document.querySelector("#camera");
+const fileInput = document.querySelector("#file");
+const dropZone = document.querySelector("#drop");
+
+const modeSelect = document.querySelector("#mode");
+const countInput = document.querySelector("#count");
+const optSizeSelect = document.querySelector("#opt-size");
+const colorCountSelect = document.querySelector("#color-count");
+const blendSelect = document.querySelector("#blend");
+const backgroundSelect = document.querySelector("#background");
+const alphaCheckbox = document.querySelector("#optimise-alpha");
+const learnBlurCheckbox = document.querySelector("#learn-blur");
+
+const playButton = document.querySelector("#play");
+const resetButton = document.querySelector("#reset");
+const cameraButton = document.querySelector("#camera-button");
+const closeCameraButton = document.querySelector("#close-camera");
+const pngButton = document.querySelector("#download-png");
+const svgButton = document.querySelector("#download-svg");
+
+const sourceLabel = document.querySelector("#source-label");
+const modelLabel = document.querySelector("#model-label");
+const renderSizeLabel = document.querySelector("#render-size");
+const stepText = document.querySelector("#step");
+const psnrText = document.querySelector("#psnr");
+const lossText = document.querySelector("#loss");
+const rateText = document.querySelector("#rate");
+const errorText = document.querySelector("#error");
+
 const MAX_COUNT = 100_000;
-const imageSizes = ["256", "512", "1080", "2048", "4096"];
-let size = imageSizes.includes(params.get("opt-size"))
-  ? params.get("opt-size")
-  : "512";
-let count = integerParam(params, "n", 256, MAX_COUNT);
-let seed = integerParam(params, "seed", 7, 0xffff_ffff, 0);
-const modelLabels = { shape: "shapes", line: "lines", capsule: "capsules" };
-let mode = params.get("mode") in modelLabels ? params.get("mode") : "shape";
-let opaque = params.get("opacity") === "opaque";
-let learnBlur = params.get("learn-blur") === "true";
-const paletteCounts = [1, 2, 4, 8, 16, 32];
-const requestedColors = Number(params.get("color-count") ?? 1);
-let colorCount = paletteCounts.includes(requestedColors) ? requestedColors : 1;
-const blends = ["src-over", "add", "multiply", "screen"];
-let blend = blends.includes(params.get("blend"))
-  ? params.get("blend")
-  : "src-over";
-let backgroundMode = ["white", "black"].includes(params.get("bg"))
-  ? params.get("bg")
-  : "auto";
+// Under "auto", each blend gets its natural backdrop.
+const AUTO_BACKGROUND = {
+  "src-over": "mean",
+  multiply: "white",
+  add: "black",
+  screen: "black",
+};
 // A 4096 px copy of the Färlev fixture, made by tools/web-image.js. The fixture
 // is optional; builds also work before it is downloaded.
 const [defaultImage] = Object.values(
@@ -42,191 +52,246 @@ const [defaultImage] = Object.values(
     import: "default",
   }),
 );
-let targetMean = [1, 1, 1];
-let background = [1, 1, 1];
-let engine;
+
+const params = new URLSearchParams(location.search);
+let seed = integerParam(params.get("seed"), 0, 0xffff_ffff, 7);
+const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
 let target;
+let targetMean = [1, 1, 1];
+let engine;
+let preview;
 let dirty = false;
 let rendering = false;
 let downloading = false;
-let stream = null;
+let lastPreview = -Infinity;
+// The still input (an image or a frozen camera frame), kept so a new opt size
+// can resample it.
+let inputImage = null;
 let live = false;
 let cameraSource = false;
 let videoTime = -1;
 let sourceGeneration = 0;
-let inputImage = null;
-let lastPreview = -Infinity;
 
-const source = $("source");
-const result = $("result");
-const sourceContext = source.getContext("2d");
-let preview;
-const work = document.createElement("canvas");
-const workContext = work.getContext("2d", { willReadFrequently: true });
-const video = $("camera");
+// An integer up to `max`, or the fallback when `value` is not one >= `min`.
+function integerParam(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  return number >= min ? Math.min(number, max) : fallback;
+}
 
-function resizeCanvases(width = 512, height = 288) {
-  const dimensions = imageSize(width, height, size);
-  source.width = work.width = dimensions.width;
-  source.height = work.height = dimensions.height;
+// The controls hold the fit options; the URL can preset them, e.g.
+// ?mode=line&n=1000&blend=add&bg=black&color-count=4&opacity=opaque.
+function presetControls() {
+  const selects = {
+    mode: modeSelect,
+    "opt-size": optSizeSelect,
+    "color-count": colorCountSelect,
+    blend: blendSelect,
+    bg: backgroundSelect,
+  };
+  for (const [name, select] of Object.entries(selects)) {
+    const value = params.get(name);
+    if ([...select.options].some((option) => option.value === value)) {
+      select.value = value;
+    }
+  }
+  countInput.value = integerParam(params.get("n"), 1, MAX_COUNT, 256);
+  alphaCheckbox.checked = params.get("opacity") !== "opaque";
+  learnBlurCheckbox.checked = params.get("learn-blur") === "true";
+}
+
+const shapeCount = () => integerParam(countInput.value, 1, MAX_COUNT, 256);
+
+function backgroundColor() {
+  const choice =
+    backgroundSelect.value === "auto"
+      ? AUTO_BACKGROUND[blendSelect.value]
+      : backgroundSelect.value;
+  return { mean: targetMean, white: [1, 1, 1], black: [0, 0, 0] }[choice];
+}
+
+// Size the target canvas for an input: the opt size caps the longest side, and
+// smaller inputs are not enlarged.
+function resizeTarget(width = 512, height = 288) {
+  const optSize = Number(optSizeSelect.value);
+  const scale = Math.min(1, optSize / Math.max(width, height));
+  sourceCanvas.width = Math.max(1, Math.round(width * scale));
+  sourceCanvas.height = Math.max(1, Math.round(height * scale));
   document.documentElement.style.setProperty(
     "--image-aspect",
-    `${dimensions.width} / ${dimensions.height}`,
+    `${sourceCanvas.width} / ${sourceCanvas.height}`,
   );
-  target = new Float32Array(work.width * work.height * 4);
+  target = new Float32Array(sourceCanvas.width * sourceCanvas.height * 4);
   dirty = true;
   if (engine) {
-    engine.width = work.width;
-    engine.height = work.height;
+    engine.width = sourceCanvas.width;
+    engine.height = sourceCanvas.height;
   }
 }
 
-function drawSource(input, width, height, mirror = false) {
+// Draw the input onto the target canvas (over white, mirrored for the camera)
+// and read it back as the RGBA target.
+function captureTarget(input, mirror) {
+  const { width, height } = sourceCanvas;
   sourceContext.save();
   sourceContext.fillStyle = "#fff";
-  sourceContext.fillRect(0, 0, source.width, source.height);
+  sourceContext.fillRect(0, 0, width, height);
   if (mirror) {
-    sourceContext.translate(source.width, 0);
+    sourceContext.translate(width, 0);
     sourceContext.scale(-1, 1);
   }
-  sourceContext.drawImage(input, 0, 0, source.width, source.height);
+  sourceContext.drawImage(input, 0, 0, width, height);
   sourceContext.restore();
-}
-
-function captureTarget(input, width, height, mirror = false) {
-  workContext.save();
-  workContext.fillStyle = "#fff";
-  workContext.fillRect(0, 0, work.width, work.height);
-  if (mirror) {
-    workContext.translate(work.width, 0);
-    workContext.scale(-1, 1);
-  }
-  workContext.drawImage(input, 0, 0, work.width, work.height);
-  workContext.restore();
-  const targetBytes = workContext.getImageData(
-    0,
-    0,
-    work.width,
-    work.height,
-  ).data;
-  const pixels = work.width * work.height;
+  const bytes = sourceContext.getImageData(0, 0, width, height).data;
+  for (let i = 0; i < bytes.length; i++) target[i] = bytes[i] / 255;
+  const pixels = width * height;
   targetMean = [0, 0, 0];
-  for (let i = 0; i < pixels; i++) {
-    for (let c = 0; c < 3; c++) {
-      const value = targetBytes[4 * i + c] / 255;
-      target[4 * i + c] = value;
-      targetMean[c] += value;
-    }
-    target[4 * i + 3] = 1;
+  for (let i = 0; i < target.length; i += 4) {
+    for (let c = 0; c < 3; c++) targetMean[c] += target[i + c] / pixels;
   }
-  for (let c = 0; c < 3; c++) targetMean[c] /= pixels;
-  updateBackground();
 }
 
-function updateBackground() {
-  const chosen =
-    backgroundMode === "auto"
-      ? blend === "src-over"
-        ? "mean"
-        : blend === "multiply"
-          ? "white"
-          : "black"
-      : backgroundMode;
-  background =
-    chosen === "mean" ? targetMean : chosen === "white" ? [1, 1, 1] : [0, 0, 0];
-}
-
-function resetOptions() {
-  if (!engine) return;
-  updateBackground();
-  engine.blend = blend;
-  engine.setTarget(target, background);
-  $("error").textContent = "";
-  engine.reset(true).catch(showError);
+// Fit a new input from scratch.
+async function useInput(input, width, height, mirror) {
+  resizeTarget(width, height);
+  captureTarget(input, mirror);
+  updateSourceLabel(width, height);
+  engine.setTarget(target, backgroundColor());
+  await engine.reset(true);
 }
 
 async function loadImage(url) {
   const ticket = ++sourceGeneration;
   const image = new Image();
-  image.decoding = "async";
   image.src = url;
   await image.decode();
   if (ticket !== sourceGeneration) return;
   stopCamera();
   cameraSource = false;
   inputImage = image;
-  resizeCanvases(image.width, image.height);
-  captureTarget(image, image.width, image.height);
-  drawSource(image, image.width, image.height);
-  updateSourceLabel(image.width, image.height);
-  engine.setTarget(target, background);
-  await engine.reset(true);
+  await useInput(image, image.width, image.height, false);
 }
 
-function updateSourceLabel(width, height) {
-  $("source-label").textContent = cameraSource
-    ? `webcam · ${live ? "live" : "frozen"} · ${work.width} × ${work.height}`
-    : `${width} × ${height} → ${work.width} × ${work.height}`;
+function loadFile(file) {
+  const url = URL.createObjectURL(file);
+  loadImage(url)
+    .catch(showError)
+    .finally(() => URL.revokeObjectURL(url));
 }
 
 async function resizeInput() {
-  const input = live ? video : inputImage;
-  if (!input) return;
-  const width = live ? video.videoWidth : input.width;
-  const height = live ? video.videoHeight : input.height;
-  resizeCanvases(width, height);
-  captureTarget(input, width, height, cameraSource);
-  drawSource(input, width, height, cameraSource);
-  updateSourceLabel(width, height);
-  engine.setTarget(target, background);
-  await engine.reset(true);
+  if (live) {
+    await useInput(video, video.videoWidth, video.videoHeight, true);
+  } else if (inputImage) {
+    await useInput(inputImage, inputImage.width, inputImage.height, cameraSource);
+  }
+}
+
+// Rebuild the model after an option changes.
+function restart() {
+  engine.blend = blendSelect.value;
+  updateControls();
+  if (!engine.target) return;
+  engine.background = backgroundColor();
+  errorText.textContent = "";
+  engine.reset(true).catch(showError);
+}
+
+function updateSourceLabel(width, height) {
+  const size = `${sourceCanvas.width} × ${sourceCanvas.height}`;
+  sourceLabel.textContent = cameraSource
+    ? `webcam · ${live ? "live" : "frozen"} · ${size}`
+    : `${width} × ${height} → ${size}`;
+}
+
+async function startCamera() {
+  sourceGeneration++;
+  video.srcObject = await navigator.mediaDevices.getUserMedia({ video: true });
+  try {
+    await video.play();
+    live = true;
+    cameraSource = true;
+    videoTime = -1;
+    await useInput(video, video.videoWidth, video.videoHeight, true);
+  } catch (error) {
+    stopCamera();
+    throw error;
+  }
+}
+
+// Keep optimizing toward the current camera frame, without a reset.
+function freezeCamera() {
+  // Keep the full-size frame so changing the opt size can resample it.
+  inputImage = document.createElement("canvas");
+  inputImage.width = video.videoWidth;
+  inputImage.height = video.videoHeight;
+  inputImage.getContext("2d").drawImage(video, 0, 0);
+  captureTarget(video, true);
+  stopCamera();
+  engine.updateTarget(target, backgroundColor());
+  updateSourceLabel(inputImage.width, inputImage.height);
+}
+
+async function closeCamera() {
+  sourceGeneration++;
+  stopCamera();
+  cameraSource = false;
+  updateControls();
+  if (defaultImage) return loadImage(defaultImage);
+  await engine.clear();
+  inputImage = null;
+  resizeTarget();
+  preview.clear();
+  sourceLabel.textContent = "choose an image";
+}
+
+function refreshCamera() {
+  if (!video.videoWidth || video.currentTime === videoTime) return;
+  videoTime = video.currentTime;
+  captureTarget(video, true);
+  engine.updateTarget(target, backgroundColor());
+  dirty = true;
+}
+
+function stopCamera() {
+  video.srcObject?.getTracks().forEach((track) => track.stop());
+  video.srcObject = null;
+  live = false;
+  updateControls();
 }
 
 function frameLoop(now = 0) {
   requestAnimationFrame(frameLoop);
   if (live) refreshCamera();
-  const box = result.getBoundingClientRect();
-  const dimensions = previewSize(
-    box.width,
-    box.height,
-    window.devicePixelRatio || 1,
-  );
-  if (dimensions.width !== result.width || dimensions.height !== result.height)
+  // The preview renders at the canvas's display resolution.
+  const box = resultCanvas.getBoundingClientRect();
+  const width = Math.max(1, Math.round(box.width * devicePixelRatio));
+  const height = Math.max(1, Math.round(box.height * devicePixelRatio));
+  if (width !== resultCanvas.width || height !== resultCanvas.height) {
     dirty = true;
+  }
   if (!dirty || rendering || now - lastPreview < 1000 / 30) return;
   dirty = false;
   lastPreview = now;
-  if (live && video.videoWidth)
-    drawSource(video, video.videoWidth, video.videoHeight, true);
   const snapshot = engine.snapshot();
   if (snapshot) {
     rendering = true;
     const generation = engine.generation;
+    const isCurrent = () => generation === engine.generation && !!engine.target;
     preview
-      .render(
-        snapshot,
-        dimensions.width,
-        dimensions.height,
-        () => generation === engine.generation && !!engine.target,
-      )
+      .render(snapshot, width, height, isCurrent)
       .then((rendered) => {
-        if (rendered)
-          $("render-size").textContent =
-            `${dimensions.width} × ${dimensions.height}`;
+        if (rendered) renderSizeLabel.textContent = `${width} × ${height}`;
       })
       .catch(showError)
       .finally(() => {
         rendering = false;
       });
   }
-  $("step").textContent = String(engine.step);
-  $("loss").textContent =
-    engine.loss == null ? "–" : engine.loss.toExponential(3);
-  $("psnr").textContent =
-    engine.loss > 0 ? `${(-10 * Math.log10(engine.loss)).toFixed(2)} dB` : "–";
-  $("rate").textContent = engine.averageMs
-    ? `${engine.averageMs.toFixed(1)} ms`
-    : "–";
+  const { step, loss, averageMs } = engine;
+  stepText.textContent = step;
+  lossText.textContent = loss == null ? "–" : loss.toExponential(3);
+  psnrText.textContent = loss > 0 ? `${(-10 * Math.log10(loss)).toFixed(2)} dB` : "–";
+  rateText.textContent = averageMs ? `${averageMs.toFixed(1)} ms` : "–";
   updateControls();
 }
 
@@ -247,218 +312,106 @@ async function downloadScene(format) {
   }
 }
 
-async function startCamera() {
-  if (live) {
-    // Keep the original frozen frame so changing fit size can resample it.
-    inputImage = document.createElement("canvas");
-    inputImage.width = video.videoWidth;
-    inputImage.height = video.videoHeight;
-    inputImage.getContext("2d").drawImage(video, 0, 0);
-    captureTarget(video, video.videoWidth, video.videoHeight, true);
-    drawSource(video, video.videoWidth, video.videoHeight, true);
-    stopCamera();
-    engine.updateTarget(target, background);
-    updateSourceLabel(inputImage.width, inputImage.height);
-    return;
-  }
-  sourceGeneration++;
-  stream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: false,
-  });
-  video.srcObject = stream;
-  try {
-    await video.play();
-    live = true;
-    cameraSource = true;
-    videoTime = -1;
-    resizeCanvases(video.videoWidth, video.videoHeight);
-    captureTarget(video, video.videoWidth, video.videoHeight, true);
-    drawSource(video, video.videoWidth, video.videoHeight, true);
-    updateSourceLabel(video.videoWidth, video.videoHeight);
-    engine.setTarget(target, background);
-    await engine.reset(true);
-    updateControls();
-  } catch (error) {
-    stopCamera();
-    throw error;
-  }
-}
-
-async function closeCamera() {
-  sourceGeneration++;
-  stopCamera();
-  cameraSource = false;
-  updateControls();
-  if (defaultImage) {
-    await loadImage(defaultImage);
-  } else {
-    engine.playing = false;
-    engine.generation++;
-    if (engine.activeStep) await engine.activeStep.catch(() => {});
-    engine.setTarget(null);
-    engine.session = null;
-    engine.model = null;
-    engine.step = 0;
-    engine.loss = null;
-    engine.averageMs = 0;
-    inputImage = null;
-    resizeCanvases();
-    sourceContext.clearRect(0, 0, source.width, source.height);
-    preview.clear();
-    $("source-label").textContent = "choose an image";
-    dirty = true;
-  }
-}
-
-function refreshCamera() {
-  if (!video.videoWidth || video.currentTime === videoTime) return;
-  videoTime = video.currentTime;
-  captureTarget(video, video.videoWidth, video.videoHeight, true);
-  engine.updateTarget(target, background);
-  dirty = true;
-}
-
-function stopCamera() {
-  stream?.getTracks().forEach((track) => track.stop());
-  stream = null;
-  video.srcObject = null;
-  live = false;
-  updateControls();
-}
-
 function updateControls() {
-  $("play").textContent = engine.playing ? "pause" : "play";
-  $("camera-button").textContent = live ? "freeze camera" : "webcam";
-  $("close-camera").hidden = !cameraSource;
   const ready = !!engine.model && !!engine.target;
-  $("play").disabled = !ready;
-  $("reset").disabled = !ready;
-  $("camera-button").disabled = false;
-  $("download-png").disabled = !ready || downloading;
-  $("download-svg").disabled =
-    !ready || downloading || blend !== "src-over" || learnBlur;
-  $("download-svg").title = learnBlur
+  const normalBlend = blendSelect.value === "src-over";
+  const learnBlur = learnBlurCheckbox.checked;
+  modelLabel.textContent = modeSelect.selectedOptions[0].text;
+  playButton.textContent = engine.playing ? "pause" : "play";
+  playButton.disabled = !ready;
+  resetButton.disabled = !ready;
+  cameraButton.textContent = live ? "freeze camera" : "webcam";
+  cameraButton.disabled = false;
+  closeCameraButton.hidden = !cameraSource;
+  pngButton.disabled = !ready || downloading;
+  svgButton.disabled = !ready || downloading || !normalBlend || learnBlur;
+  svgButton.title = learnBlur
     ? "SVG cannot represent Windfoil per-shape blur"
-    : blend === "src-over"
+    : normalBlend
       ? ""
       : "SVG download requires normal blending";
 }
 
 function showError(error) {
-  $("error").textContent = error?.message ?? String(error);
+  errorText.textContent = error?.message ?? String(error);
   console.error(error);
 }
 
 function bindUi() {
-  for (const input of document.querySelectorAll('input[type="number"]')) {
-    input.addEventListener(
-      "wheel",
-      (event) => {
-        if (document.activeElement === input) event.preventDefault();
-      },
-      { passive: false },
-    );
-  }
-  $("play").onclick = () => {
+  // Scrolling over the focused count field should scroll the page, not
+  // change the count.
+  countInput.addEventListener(
+    "wheel",
+    (event) => {
+      if (document.activeElement === countInput) event.preventDefault();
+    },
+    { passive: false },
+  );
+  playButton.onclick = () => {
     engine.playing = !engine.playing;
     updateControls();
   };
-  $("reset").onclick = () => engine.reset(true).catch(showError);
-  $("camera-button").onclick = () => startCamera().catch(showError);
-  $("close-camera").onclick = () => closeCamera().catch(showError);
-  $("download-png").onclick = () => downloadScene("png").catch(showError);
-  $("download-svg").onclick = () => downloadScene("svg").catch(showError);
-  $("count").onchange = () => {
-    count = boundedInteger($("count").value, count, 1, MAX_COUNT);
-    $("count").value = count;
-    resetOptions();
+  resetButton.onclick = () => engine.reset(true).catch(showError);
+  cameraButton.onclick = () => {
+    if (live) freezeCamera();
+    else startCamera().catch(showError);
   };
-  $("opt-size").onchange = () => {
-    size = $("opt-size").value;
-    resizeInput().catch(showError);
+  closeCameraButton.onclick = () => closeCamera().catch(showError);
+  pngButton.onclick = () => downloadScene("png").catch(showError);
+  svgButton.onclick = () => downloadScene("svg").catch(showError);
+  countInput.onchange = () => {
+    countInput.value = shapeCount();
+    restart();
   };
-  $("mode").onchange = () => {
-    mode = $("mode").value;
-    $("model-label").textContent = modelLabels[mode];
-    resetOptions();
+  optSizeSelect.onchange = () => resizeInput().catch(showError);
+  for (const control of [
+    modeSelect,
+    colorCountSelect,
+    blendSelect,
+    backgroundSelect,
+    alphaCheckbox,
+    learnBlurCheckbox,
+  ]) {
+    control.onchange = restart;
+  }
+  fileInput.onchange = () => {
+    const [file] = fileInput.files;
+    if (file) loadFile(file);
+    fileInput.value = "";
   };
-  $("color-count").onchange = () => {
-    colorCount = Number($("color-count").value);
-    resetOptions();
-  };
-  $("blend").onchange = () => {
-    blend = $("blend").value;
-    resetOptions();
-  };
-  $("background").onchange = () => {
-    backgroundMode = $("background").value;
-    resetOptions();
-  };
-  $("optimise-alpha").onchange = () => {
-    opaque = !$("optimise-alpha").checked;
-    resetOptions();
-  };
-  $("learn-blur").onchange = () => {
-    learnBlur = $("learn-blur").checked;
-    resetOptions();
-  };
-  $("file").onchange = ({ target: input }) => {
-    const file = input.files?.[0];
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    loadImage(url)
-      .catch(showError)
-      .finally(() => URL.revokeObjectURL(url));
-    input.value = "";
-  };
-  const drop = $("drop");
-  drop.onclick = () => $("file").click();
+  dropZone.onclick = () => fileInput.click();
   window.ondragover = (event) => event.preventDefault();
   window.ondrop = (event) => {
     event.preventDefault();
     const file = [...event.dataTransfer.files].find((item) =>
       item.type.startsWith("image/"),
     );
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    loadImage(url)
-      .catch(showError)
-      .finally(() => URL.revokeObjectURL(url));
+    if (file) loadFile(file);
   };
 }
 
 async function main() {
-  resizeCanvases();
-  $("count").value = count;
-  $("opt-size").value = size;
-  $("mode").value = mode;
-  $("color-count").value = colorCount;
-  $("blend").value = blend;
-  $("background").value = backgroundMode;
-  $("optimise-alpha").checked = !opaque;
-  $("learn-blur").checked = learnBlur;
-  $("model-label").textContent = modelLabels[mode];
-  bindUi();
+  presetControls();
+  resizeTarget();
   const device = await requestDevice();
-  preview = new Preview(device, result);
+  preview = new Preview(device, resultCanvas);
   engine = new Engine(device, {
-    width: work.width,
-    height: work.height,
-    blend,
+    width: sourceCanvas.width,
+    height: sourceCanvas.height,
+    blend: blendSelect.value,
     build: () =>
       buildFitModel({
-        mode,
-        n: count,
+        mode: modeSelect.value,
+        n: shapeCount(),
         width: engine.width,
         height: engine.height,
         seed: seed++,
         target: engine.target,
         background: engine.background,
-        colorCount,
-        opaque,
-        learnBlur,
-        lrScale: blend === "src-over" ? 1 : 0.25,
+        colorCount: Number(colorCountSelect.value),
+        opaque: !alphaCheckbox.checked,
+        learnBlur: learnBlurCheckbox.checked,
+        lrScale: blendSelect.value === "src-over" ? 1 : 0.25,
       }),
     settings: () => ({ s: [1, 1], bg: engine.background }),
     onFrame: () => {
@@ -466,9 +419,10 @@ async function main() {
     },
     onError: showError,
   });
+  bindUi();
   updateControls();
   if (defaultImage) await loadImage(defaultImage);
-  else $("source-label").textContent = "choose an image";
+  else sourceLabel.textContent = "choose an image";
   frameLoop();
   engine.run();
 }

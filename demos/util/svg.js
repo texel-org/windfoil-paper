@@ -1,8 +1,7 @@
-const byte = (value) => Math.max(0, Math.min(255, Math.round(value * 255)));
+import { rgbToHex } from './color.js';
+
 const number = (value) => Number(value.toFixed(3));
 const cm = (value) => Number(value.toFixed(4));
-const hex = (color) =>
-  '#' + color.map((value) => byte(value).toString(16).padStart(2, '0')).join('');
 
 // Pen-plotter markers emitted in centimeter units, in creation (paint) order so
 // the SVG occludes exactly like the optimized render — overlapping opaque marks
@@ -34,7 +33,7 @@ export function plotMarkersToSVG(markers, {
       : `  <g fill="none" stroke-width="${cm(penWidthCm)}" stroke-linecap="round">`,
   );
   for (const m of markers) {
-    const color = hex(m.color);
+    const color = rgbToHex(m.color);
     lines.push(
       point
         ? `    <circle cx="${cm(m.x)}" cy="${cm(m.y)}" r="${radius}" fill="${color}"${fade(m)}/>`
@@ -74,13 +73,12 @@ export function sceneToSVG(shapes, width, height, { background = '#ffffff', view
       }
       paths.push(`${path} Z`);
     }
-    const color = '#' + shape.color.map((value) => byte(value).toString(16).padStart(2, '0')).join('');
     const fillRule = shape.fillRule ?? 'nonzero';
     if (fillRule !== 'nonzero' && fillRule !== 'evenodd') {
       throw new Error(`fillRule must be "nonzero" or "evenodd"`);
     }
     lines.push(
-      `  <path d="${paths.join(' ')}" fill="${color}" fill-opacity="${shape.alpha.toFixed(4)}" fill-rule="${fillRule}"/>`,
+      `  <path d="${paths.join(' ')}" fill="${rgbToHex(shape.color)}" fill-opacity="${shape.alpha.toFixed(4)}" fill-rule="${fillRule}"/>`,
     );
   }
   lines.push('</svg>');

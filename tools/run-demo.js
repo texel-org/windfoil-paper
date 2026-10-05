@@ -8,13 +8,12 @@ const [demo, ...args] = process.argv.slice(2);
 const entries = {
   l2: ['demos/cli.js', 'l2'],
   clip: ['demos/cli.js', 'clip'],
-  lines: ['demos/cli.js', 'lines'],
   plot: ['demos/cli.js', 'plot'],
   roundtrip: ['demos/roundtrip/cli.js'],
   render: ['demos/render/cli.js'],
 };
 if (!entries[demo]) {
-  console.error('usage: tools/run-demo.js <l2|clip|lines|plot|roundtrip|render> [options]');
+  console.error('usage: tools/run-demo.js <l2|clip|plot|roundtrip|render> [options]');
   process.exit(2);
 }
 

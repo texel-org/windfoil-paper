@@ -14,10 +14,9 @@
   },
   "scripts": {
     "demo:l2": "node tools/run-demo.js l2",
-    "demo:roundtrip": "node tools/run-demo.js roundtrip",
+    "demo:roundtrip": "node tools/run-demo.js roundtrip --blur-start=7",
     "demo:clip": "node tools/run-demo.js clip",
-    "demo:lines": "node tools/run-demo.js lines",
-    "demo:plot": "node tools/run-demo.js plot",
+    "demo:plot": "node tools/run-demo.js plot --blur=2",
     "render": "node tools/run-demo.js render",
     "clip:server": ".venv/bin/python demos/clip/loss_server.py",
     "web:demo": "node tools/web-image.js && vite --config demos/web/vite.config.js",

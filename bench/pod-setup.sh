@@ -78,13 +78,11 @@ if [ -z "$WF_VULKAN_ICD" ]; then
   exit 1
 fi
 export VK_DRIVER_FILES="$WF_VULKAN_ICD"
-export WF_WEBGPU_BACKEND=dawn
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/xdg}
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 vulkaninfo --summary 2>/dev/null | grep -m1 deviceName || true
 for line in \
   "export VK_DRIVER_FILES=$WF_VULKAN_ICD" \
-  "export WF_WEBGPU_BACKEND=dawn" \
   "export XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"; do
   grep -qxF "$line" /root/.bashrc 2>/dev/null || echo "$line" >> /root/.bashrc
 done

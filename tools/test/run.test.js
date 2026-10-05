@@ -8,11 +8,11 @@ import { optSizeLabel, parseOptSizes, resolveOptSize } from '../../demos/util/op
 import {
   assignCaseIds,
   caseLabel,
+  parseBlurOptions,
   parseSaveOptions,
   percentile,
   resolveSaveSize,
   saveFrameSettings,
-  withBlurDefaults,
 } from '../../demos/util/run.js';
 import { formatLoss } from '../../demos/util/runtime.js';
 import {
@@ -250,17 +250,16 @@ test('Windfoil hosts share one runtime mapping', () => {
   assert.throws(() => windfoilCommand('other', []), /unsupported Windfoil environment/);
 });
 
-test('blur defaults scale with the optimization canvas above 512px', () => {
-  // At or below the 512px reference the historical defaults are untouched.
-  assert.equal(withBlurDefaults({ blur: null, blurFloor: null }, 1, 128, 128).blur, 7);
-  assert.equal(withBlurDefaults({ blur: null, blurFloor: null }, 1, 512, 288).blur, 7);
-  assert.equal(withBlurDefaults({ blur: null, blurFloor: null }, 2, 512, 512).blurFloor, 2);
-  // Above it, the anneal covers the same fraction of the canvas.
-  const big = withBlurDefaults({ blur: null, blurFloor: null }, 1, 2048, 1152);
-  assert.equal(big.blur, 28);
-  assert.equal(big.blurFloor, 4);
-  // Explicit flags stay absolute at any resolution.
-  const explicit = withBlurDefaults({ blur: 3, blurFloor: 0.5 }, 1, 4096, 4096);
-  assert.equal(explicit.blur, 3);
-  assert.equal(explicit.blurFloor, 0.5);
+test('Windfoil hosts pass WF_RUNTIME on, so the renderer picks the same backend', () => {
+  for (const environment of WINDFOIL_ENVIRONMENTS) {
+    assert.equal(windfoilCommand(environment, []).env.WF_RUNTIME, environment);
+  }
+});
+
+test('blur is off unless requested, at any resolution', () => {
+  assert.deepEqual(parseBlurOptions({}), { blur: 1, blurStart: 1 });
+  // --blur alone holds that width for the whole run.
+  assert.deepEqual(parseBlurOptions({ blur: '2' }), { blur: 2, blurStart: 2 });
+  assert.deepEqual(parseBlurOptions({ 'blur-start': '7' }), { blur: 1, blurStart: 7 });
+  assert.throws(() => parseBlurOptions({ blur: '2', 'blur-start': '1' }), /at least --blur/);
 });

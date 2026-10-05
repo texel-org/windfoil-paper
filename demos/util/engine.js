@@ -7,7 +7,7 @@ import { buildLineModel } from '../lines/model.js';
 
 // Dispatch the shape / line model builders behind one signature.
 export function buildFitModel({
-  mode, n, size = null, width = size, height = size, seed, target = null,
+  mode, n, width, height, seed, target = null,
   background = [1, 1, 1], colorCount = 1, opaque = false, learnBlur = false, lrScale = 1,
 }) {
   const colorOptions = { colorCount, opaque, learnBlur, blurInit: 7, blurFloor: 1, blurCeiling: 32,
@@ -31,7 +31,7 @@ export class Engine {
   // settings: (step) => renderer settings ({ s, scale, origin, bg })
   // onFrame:  called after every accepted step and reset so the page can repaint
   // onError:  surfaces a fatal step error
-  constructor(device, { size = null, width = size, height = size, blend = 'src-over', build, settings, onFrame = null, onError = null }) {
+  constructor(device, { width, height, blend = 'src-over', build, settings, onFrame = null, onError = null }) {
     this.device = device;
     this.width = width;
     this.height = height;
@@ -52,7 +52,6 @@ export class Engine {
     this.step = 0;
     this.loss = null;
     this.averageMs = 0;
-    this.shapes = null;
 
     this.playing = false;
     this.generation = 0;
@@ -147,9 +146,21 @@ export class Engine {
     this.step = 0;
     this.loss = null;
     this.averageMs = 0;
-    this.shapes = this.model.decode().shapes;
     this.playing = true;
     this.onFrame?.(this);
+  }
+
+  // Stop optimizing and forget the target, e.g. when the page has no image.
+  async clear() {
+    this.playing = false;
+    this.generation++;
+    await this.activeStep?.catch(() => {});
+    this.target = null;
+    this.session = null;
+    this.model = null;
+    this.step = 0;
+    this.loss = null;
+    this.averageMs = 0;
   }
 
   snapshot(includeShapes = false) {
@@ -187,7 +198,6 @@ export class Engine {
         const update = await pending;
         if (active !== this.session || ticket !== this.generation) continue;
         this.loss = update.loss;
-        this.shapes = update.shapes;
         this.step++;
         const elapsed = performance.now() - started;
         this.averageMs = this.averageMs ? this.averageMs * 0.85 + elapsed * 0.15 : elapsed;

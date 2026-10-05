@@ -53,23 +53,26 @@ async function loadDawn() {
   return dawnLoad;
 }
 
-function denoBackendMode() {
+// Under Deno, WF_RUNTIME picks the WebGPU implementation, as it does for
+// tools/run-demo.js: deno (the default) is Deno's built-in wgpu, deno-dawn the
+// Dawn addon. There is no fallback, so a run is always on the backend it names.
+function denoRuntime() {
   if (!isRealDeno()) return null;
-  let mode = 'auto';
+  let runtime = 'deno';
   try {
-    mode = Deno.env.get('WF_WEBGPU_BACKEND') ?? 'auto';
+    runtime = Deno.env.get('WF_RUNTIME') ?? 'deno';
   } catch (error) {
     // Keep built-in WebGPU usable without --allow-env.
     if (error?.name !== 'NotCapable' && error?.name !== 'PermissionDenied') throw error;
   }
-  if (mode !== 'auto' && mode !== 'dawn' && mode !== 'wgpu') {
-    throw new Error(`invalid WF_WEBGPU_BACKEND=${JSON.stringify(mode)} (expected auto, dawn, or wgpu)`);
+  if (runtime !== 'deno' && runtime !== 'deno-dawn') {
+    throw new Error(`WF_RUNTIME=${JSON.stringify(runtime)} under Deno (expected deno or deno-dawn)`);
   }
-  return mode;
+  return runtime;
 }
 
 async function requestAdapter() {
-  const mode = denoBackendMode();
+  const runtime = denoRuntime();
   const opts = { powerPreference: 'high-performance' };
 
   if (isNode()) {
@@ -77,39 +80,36 @@ async function requestAdapter() {
     return { adapter: await gpu.requestAdapter(opts), environment: 'node', backend: 'dawn' };
   }
 
-  // Dawn avoids built-in wgpu's high mapAsync latency; built-in remains the fallback.
-  if (mode && mode !== 'wgpu') {
+  // Dawn avoids built-in wgpu's high mapAsync latency.
+  if (runtime === 'deno-dawn') {
     try {
       const gpu = await loadDawn();
       const adapter = await gpu.requestAdapter(opts);
       if (!adapter) throw new Error('Dawn returned no WebGPU adapter');
       return { adapter, environment: 'deno-dawn', backend: 'dawn' };
     } catch (error) {
-      if (mode === 'dawn') {
-        const detail = String(error?.message ?? error);
-        if (
-          Deno.build.os === 'darwin' &&
-          /MTLLogStateDescriptor|built for macOS 15/i.test(detail)
-        ) {
-          throw new Error(
-            'The published Deno+Dawn addon requires macOS 15 or newer. ' +
-              'Use WF_RUNTIME=deno or the default Node runtime on this Mac.',
-            { cause: error },
-          );
-        }
+      const detail = String(error?.message ?? error);
+      if (
+        Deno.build.os === 'darwin' &&
+        /MTLLogStateDescriptor|built for macOS 15/i.test(detail)
+      ) {
         throw new Error(
-          'WF_WEBGPU_BACKEND=dawn requested, but the webgpu native addon could not initialize ' +
-            '(install gpu dependencies and grant --allow-ffi, or use -A)',
+          'The published Deno+Dawn addon requires macOS 15 or newer. ' +
+            'Use WF_RUNTIME=deno or the default Node runtime on this Mac.',
           { cause: error },
         );
       }
-      console.warn(`Deno+Dawn unavailable (${error?.message ?? error}); falling back to built-in wgpu`);
+      throw new Error(
+        'WF_RUNTIME=deno-dawn requested, but the webgpu native addon could not initialize ' +
+          '(install gpu dependencies and grant --allow-ffi, or use -A)',
+        { cause: error },
+      );
     }
   }
 
   const gpu = globalThis.navigator?.gpu;
   const adapter = await gpu?.requestAdapter(opts);
-  return mode === 'wgpu' || mode === 'auto'
+  return runtime === 'deno'
     ? { adapter, environment: 'deno', backend: 'wgpu' }
     : { adapter, environment: 'web', backend: 'webgpu' };
 }

@@ -32,7 +32,7 @@ import {
 // --pad is a fraction of the longest side; clamp it so the canvas can neither
 // shrink nor blow up (at 0.5 the optimization canvas roughly doubles).
 const MAX_PAD = 0.5;
-import { annealSettings, shapeCli } from "./model.js";
+import { annealedBlur, shapeCli } from "./model.js";
 import { lineCli } from "../lines/model.js";
 import { plotCli } from "../plot/model.js";
 import { LOSSES } from "./losses.js";
@@ -128,7 +128,6 @@ export async function runCase({
   const pad = Math.round((config.pad ?? 0) * Math.max(width, height));
   const optWidth = width + 2 * pad;
   const optHeight = height + 2 * pad;
-  config = withBlurDefaults(config, modelCli.blurFloor, optWidth, optHeight);
   const target =
     visibleTarget && pad > 0
       ? { ...visibleTarget, rgba: padImage(visibleTarget.rgba, width, height, pad) }
@@ -192,21 +191,19 @@ export async function runCase({
         ? config.budget.value
         : modelCli.defaults.steps,
     );
-    const settings = (step) =>
-      annealSettings(
-        step,
-        scheduleSteps,
-        background,
-        config.blur,
-        config.blurFloor,
-      );
+    const blurAt = (step) =>
+      annealedBlur(step, scheduleSteps, config.blurStart, config.blur);
+    const settings = (step) => {
+      const s = blurAt(step);
+      return { s: [s, s], bg: background };
+    };
     // Band-limited tone matching (plot): the render is compared against a target
     // box-filtered like the renderer's current filter, so mark density can
     // express gray levels instead of chasing crisp pixels.
     let stepTarget = target?.rgba ?? null;
     if (modelCli.bandLimited && target) {
       const blurred = blurredTargetProvider(target.rgba, optWidth, optHeight);
-      stepTarget = (step) => blurred(settings(step).s[0]);
+      stepTarget = (step) => blurred(blurAt(step));
     }
     if (config.saveEvery) {
       await mkdir(`${path}/frames`);
@@ -370,7 +367,7 @@ export async function runCase({
       seed: config.seed,
       blend: config.blend === "src-over" ? undefined : config.blend,
       blur: config.blur,
-      blurFloor: config.blurFloor,
+      blurStart: config.blurStart,
       // --learn-blur trains a per-shape filter size instead of following the
       // global anneal; it changes the model, so record it for reproducibility
       // (omitted when off, like the other falsy-defaulted flags here).
@@ -480,18 +477,14 @@ export async function runCase({
   }
 }
 
-// Blur defaults are resolution-aware above a 512px reference: the anneal
-// (and the learned-blur init) should cover the same *fraction* of a 2048px
-// canvas as of a 512px one, not the same absolute pixels. Explicit --blur /
-// --blur-floor values stay absolute, and canvases at or below 512px keep
-// the historical defaults exactly.
-export function withBlurDefaults(config, modelFloor, optWidth, optHeight) {
-  const scale = Math.max(1, Math.max(optWidth, optHeight) / 512);
-  return {
-    ...config,
-    blur: config.blur ?? 7 * scale,
-    blurFloor: config.blurFloor ?? modelFloor * scale,
-  };
+// Box-filter width in pixels: --blur for the whole run (default 1, crisp), or
+// a wider --blur-start that eases down to it (see annealedBlur). With
+// --learn-blur, each shape starts at --blur-start and never goes below --blur.
+export function parseBlurOptions(options) {
+  const blur = "blur" in options ? positiveArg(options, "blur") : 1;
+  const blurStart = "blur-start" in options ? positiveArg(options, "blur-start") : blur;
+  if (blurStart < blur) throw new Error("--blur-start must be at least --blur");
+  return { blur, blurStart };
 }
 
 export function saveFrameSettings({
@@ -532,7 +525,10 @@ function expandCases(lossKind, options, modelKind) {
     "n",
   );
   const sizes = parseOptSizes(
-    nonEmpty(argList(options, "opt-size", [defaults.size]), "opt-size"),
+    nonEmpty(
+      argList(options, "opt-size", [lossCli.defaultSize ?? defaults.size]),
+      "opt-size",
+    ),
   );
   const explicitSteps = "steps" in options;
   const explicitSeconds = "seconds" in options;
@@ -572,10 +568,7 @@ function expandCases(lossKind, options, modelKind) {
       : 0.05,
     white: "white" in options ? positiveArg(options, "white") : 1,
     whiteLr: "white-lr" in options ? positiveArg(options, "white-lr") : 0.05,
-    // Blur flags stay absolute when given; when absent the defaults resolve
-    // per case, scaled to the optimization canvas (see withBlurDefaults).
-    blur: "blur" in options ? positiveArg(options, "blur") : null,
-    blurFloor: "blur-floor" in options ? positiveArg(options, "blur-floor") : null,
+    ...parseBlurOptions(options),
     // --lr-scale multiplies every parameter group's learning rate. The
     // models' defaults are tuned against src-over; order-independent blends
     // deliver unattenuated gradients whose effective step grows with overlap
