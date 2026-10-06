@@ -102,9 +102,13 @@ Other Python-related commands:
 - `npm run validate` requires JAX and Deno (CPU only tests/checks)
 - `npm run test:oracle` compares JAX with WebGPU render
 
-## GPU benchmarks
+## Benchmarks & Validation
 
-See [bench/README.md](bench/README.md). Linux requires Vulkan. NVIDIA containers need `graphics` driver capability. `llvmpipe` means CPU execution. Note: do not clone recursively; use the submodule command in the benchmark setup.
+For benchmark comparisons against DiffVG and Bézier Splatting, see [bench/README.md](bench/README.md). Note that Linux will require Vulkan and NVIDIA containers need `graphics` driver capability. `llvmpipe` might suggest that CPU is being utilised instead of GPU. I've struggled to get WebGPU working with Modal but it works fine with most cheap Runpod GPUs. Also note: do not clone recursively, instead use the submodule command in the benchmark setup.
+
+The filter kernel exploration resides in another branch [filter-kernels](https://github.com/texel-org/windfoil-paper/tree/filter-kernels), it also contains some scripts for generating delta/comparison outputs used in the paper.
+
+Most of the code in this repo is optimised for differentiable rendering. The original repo, [windfoil-algorithm](https://github.com/texel-org/windfoil-algorithm/), contains examples of acceleration structures and techniques for more optimal display and real-time rendering using the same box-filtered winding integral. A future repo simply titled `windfoil` may one day be published that unifies all the code into a more user-friendly API, with additional features (e.g. strokes) not yet explored in the current research.
 
 ## Details & Disclosures
 
