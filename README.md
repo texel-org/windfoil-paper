@@ -114,7 +114,7 @@ Most of the code in this repo is optimised for differentiable rendering. The ori
 
 The original formulation of closed-form 2D coverage that runs efficiently and independently in a pixel shader was discovered by Claude Code (Fable 5) during an author-directed one-hour search for a new rasterisation algorithm. You can read more details in the [original renderer repo](https://github.com/texel-org/windfoil-algorithm), which also includes comparisons and tests against Skia and [Slug](https://terathon.com/blog/decade-slug.html). After releasing the rendering code, I soon realised that the closed-form nature of this algorithm would be well suited for differentiable rendering, whereas most differentiable renderers today use (rather slow) approximations, and do not generally optimise the same image that is intended for display. Since then, I've continued to develop "Windfoil" into a unified system, which encompasses both display/rendering and differentiability, and run a number of benchmarks against other renderers.
 
-> ⚠️ The code here is experimental, primarily for research purposes, and as a companion to a preprint on Arxiv. It is not meant to be used for production; use at your own risk.
+> ⚠️ The CLI and API here is experimental, primarily for research purposes, and as a companion to a preprint on Arxiv. It is not meant to replace a production rasteriser; use at your own risk.
 
 ## Citation
 
