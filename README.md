@@ -108,7 +108,7 @@ For benchmark comparisons against DiffVG and Bézier Splatting, see [bench/READM
 
 The filter kernel exploration resides in another branch [filter-kernels](https://github.com/texel-org/windfoil-paper/tree/filter-kernels), it also contains some scripts for generating delta/comparison outputs used in the paper.
 
-Most of the code in this repo is optimised for differentiable rendering. The original repo, [windfoil-algorithm](https://github.com/texel-org/windfoil-algorithm/), contains examples of acceleration structures and techniques for more optimal display and real-time rendering using the same box-filtered winding integral. A future repo simply titled `windfoil` may one day be published that unifies all the code into a more user-friendly API, with additional features (e.g. strokes) not yet explored in the current research.
+Most of the code in this repo is optimised for differentiable rendering. The original repo, [windfoil-algorithm](https://github.com/texel-org/windfoil-algorithm/), contains benchmarks against Slug and Skia, and also uses acceleration structures and techniques for more optimal display and real-time rendering. Its fragment shaders use the same box-filtered winding integral. A future repo simply titled `windfoil` may one day be published that unifies all the code into a more user-friendly API, with additional features (e.g. strokes) not yet explored in the current research.
 
 ## Details & Disclosures
 
